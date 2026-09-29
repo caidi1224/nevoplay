@@ -1288,22 +1288,6 @@ class CarPlayHostActivity : ComponentActivity() {
                 ViewGroup.LayoutParams.WRAP_CONTENT,
             ).apply { topMargin = dp(10) },
         )
-        content.addView(
-            Button(this).apply {
-                text = "Open system Bluetooth settings"
-                isAllCaps = false
-                textSize = 17f
-                setTextColor(MENU_BUTTON_TEXT)
-                backgroundTintList = ColorStateList.valueOf(MENU_ACCENT)
-                minHeight = dp(52)
-                setOnClickListener { openSystemBluetoothSettings() }
-            },
-            LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-            ).apply { topMargin = dp(16) },
-        )
-
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
             content.addView(
                 settingsCategoryHeader("Android 9 compatibility"),
@@ -2140,18 +2124,6 @@ class CarPlayHostActivity : ComponentActivity() {
         microphoneTestButton?.text = "Test"
         microphoneLevelBar?.progress = 0
         microphoneLevelValueView?.text = "0%"
-    }
-
-    private fun openSystemBluetoothSettings() {
-        try {
-            startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS))
-        } catch (error: ActivityNotFoundException) {
-            appendLog("System Bluetooth settings are unavailable: ${error.message}")
-            Toast.makeText(this, "System Bluetooth settings are unavailable", Toast.LENGTH_LONG).show()
-        } catch (error: SecurityException) {
-            appendLog("Cannot open system Bluetooth settings: ${error.message}")
-            Toast.makeText(this, "Cannot open system Bluetooth settings", Toast.LENGTH_LONG).show()
-        }
     }
 
     /**
