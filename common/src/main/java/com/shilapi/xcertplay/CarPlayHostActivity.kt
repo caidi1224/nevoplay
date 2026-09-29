@@ -232,7 +232,7 @@ class CarPlayHostActivity : ComponentActivity() {
 
     private var videoView: TextureView? = null
     private var gestureOverlay: View? = null
-    private var disconnectedSettingsButton: View? = null
+    private var idleHomeView: View? = null
     private var settingsMenu: View? = null
     private var mfiTargetGroup: RadioGroup? = null
     private var mfiI2cFields: View? = null
@@ -723,17 +723,6 @@ class CarPlayHostActivity : ComponentActivity() {
                 setColor(Color.argb(170, 0, 0, 0))
             }
         }
-        val settingsButton = ImageButton(this).apply {
-            setImageResource(R.drawable.ic_settings)
-            imageTintList = ColorStateList.valueOf(Color.rgb(0xA6, 0x7D, 0xF2))
-            background = GradientDrawable().apply {
-                shape = GradientDrawable.OVAL
-                setColor(Color.rgb(0xE3, 0xE3, 0xE4))
-            }
-            setPadding(dp(14), dp(14), dp(14), dp(14))
-            contentDescription = "Open settings"
-            setOnClickListener { openSettingsMenu() }
-        }
         val statusParams = FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.MATCH_PARENT,
             FrameLayout.LayoutParams.WRAP_CONTENT,
@@ -746,11 +735,6 @@ class CarPlayHostActivity : ComponentActivity() {
             Gravity.TOP or Gravity.END,
         )
         stageParams.setMargins(dp(12), dp(12), dp(12), 0)
-        val settingsButtonParams = FrameLayout.LayoutParams(
-            dp(80),
-            dp(80),
-            Gravity.BOTTOM or Gravity.START,
-        ).apply { setMargins(dp(16), 0, dp(16), dp(16)) }
         // Bottom-right corner: which build this is, so a head unit in the car can be identified
         // without pulling a log. Kept non-clickable so touches reach the video underneath.
         val buildLabel = TextView(this).apply {
@@ -783,9 +767,16 @@ class CarPlayHostActivity : ComponentActivity() {
                 FrameLayout.LayoutParams.MATCH_PARENT,
             ),
         )
+        val idleHome = buildIdleHome().apply { visibility = View.GONE }
+        root.addView(
+            idleHome,
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT,
+            ),
+        )
         root.addView(logScroll, statusParams)
         root.addView(stageStatus, stageParams)
-        root.addView(settingsButton, settingsButtonParams)
         root.addView(buildLabel, buildLabelParams)
         buildLabelView = buildLabel
         root.addView(
@@ -804,14 +795,117 @@ class CarPlayHostActivity : ComponentActivity() {
         )
         videoView = video
         gestureOverlay = gestureLayer
-        disconnectedSettingsButton = settingsButton
         settingsMenu = settings
         safeAreaEditor = editor
         statusView = log
         statusScrollView = logScroll
         stageStatusView = stageStatus
+        idleHomeView = idleHome
         updateDebugOverlays()
         return root
+    }
+
+    /**
+     * The screen shown when no CarPlay picture is on the display.
+     *
+     * It replaces the old floating gear button, which sat inside CarPlay's own sidebar column. Every
+     * action here is real: the primary button asks the controller to start, the secondary one opens
+     * settings, and the gesture hint tells the driver how to get back in once the picture is up.
+     */
+    private fun buildIdleHome(): View {
+        val column = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(56), dp(40), dp(56), dp(40))
+        }
+
+        val brand = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        brand.addView(
+            ImageView(this).apply { setImageResource(R.drawable.ic_brand) },
+            LinearLayout.LayoutParams(dp(48), dp(48)),
+        )
+        brand.addView(
+            GlassUi.text(this, "xcertplay", 27f, GlassUi.TEXT, bold = true).apply {
+                setPadding(dp(16), 0, 0, 0)
+            },
+        )
+        column.addView(brand, GlassUi.block(this))
+
+        column.addView(
+            GlassUi.text(
+                this,
+                "WIRELESS CARPLAY",
+                13f,
+                GlassUi.TEXT_TERTIARY,
+                bold = true,
+                letterSpacing = 0.18f,
+            ).apply { setPadding(0, dp(72), 0, 0) },
+            GlassUi.block(this),
+        )
+        column.addView(
+            GlassUi.text(this, "等待连接 iPhone", 56f, GlassUi.TEXT, bold = true),
+            GlassUi.block(this, 12),
+        )
+        column.addView(
+            GlassUi.text(
+                this,
+                "先在车机的蓝牙设置里配对手机，然后点下面的按钮。",
+                21f,
+                GlassUi.TEXT_SECONDARY,
+            ),
+            GlassUi.block(this, 16),
+        )
+
+        val card = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(30), dp(28), dp(30), dp(28))
+            background = GlassUi.glass(GlassUi.RADIUS_XL)
+            clipToOutline = true
+            elevation = dp(8).toFloat()
+        }
+        card.addView(
+            GlassUi.text(
+                this,
+                "无线 CarPlay",
+                14f,
+                GlassUi.TEXT_TERTIARY,
+                bold = true,
+                letterSpacing = 0.16f,
+            ),
+        )
+        card.addView(
+            GlassUi.primaryButton(this, "连接 iPhone") { maybeStartCarPlay() },
+            GlassUi.block(this, 18),
+        )
+        card.addView(
+            GlassUi.text(
+                this,
+                "保持蓝牙与 Wi-Fi 打开；首次连接需要在手机上确认一次。",
+                17f,
+                GlassUi.TEXT_TERTIARY,
+            ),
+            GlassUi.block(this, 16),
+        )
+        column.addView(card, GlassUi.block(this, 36))
+
+        column.addView(
+            GlassUi.ghostButton(this, "设置") { openSettingsMenu() },
+            GlassUi.block(this, 18),
+        )
+        column.addView(
+            GlassUi.text(
+                this,
+                "投屏后画面上没有任何按钮：三指下滑可随时打开设置。",
+                16f,
+                GlassUi.TEXT_TERTIARY,
+            ),
+            GlassUi.block(this, 20),
+        )
+
+        scaleMenuTextSize(column, menuTextScale())
+        return column
     }
 
     private fun buildSettingsMenu(): View {
@@ -3905,8 +3999,14 @@ class CarPlayHostActivity : ComponentActivity() {
     private fun updateDebugOverlays() {
         val showLogs = debugLogsEnabled && !menuOpen
         statusScrollView?.visibility = if (showLogs) View.VISIBLE else View.GONE
-        disconnectedSettingsButton?.visibility =
-            if (!menuOpen && activeScreenStreamTypes.isEmpty()) View.VISIBLE else View.GONE
+        // The idle home exists only while there is no picture: once CarPlay is on screen, the image
+        // is the interface and the three-finger swipe is the only way in.
+        idleHomeView?.visibility =
+            if (!menuOpen && !debugLogsEnabled && activeScreenStreamTypes.isEmpty()) {
+                View.VISIBLE
+            } else {
+                View.GONE
+            }
         val showStage = !debugLogsEnabled &&
             !menuOpen &&
             activeScreenStreamTypes.isEmpty()
