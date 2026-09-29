@@ -305,9 +305,6 @@
       <div class="micro">v1.3.1.21</div>
     </div>
 
-    <h1 style="font-size:56px; margin-top:46px;">你的车,你的方式。</h1>
-    <div class="sub" style="font-size:22px;">连接、显示与声音,都在一处。</div>
-
     <div class="glass search">
       <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
            stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
@@ -441,5 +438,47 @@
     document.querySelectorAll('.screen').forEach(s => s.style.margin = '0 0 60px');
   }
 </script>
+
+<!-- ============================ 5. 投屏中：控件自动隐藏 + 冲突区域 ============================ -->
+<section class="screen" id="s5">
+  <div class="videofake"></div>
+  <div class="vdash" style="left:120px; top:300px; width:900px; height:26px; transform:rotate(-8deg);"></div>
+  <div class="vdash" style="left:640px; top:180px; width:26px; height:760px; transform:rotate(6deg);"></div>
+  <div class="vdash" style="left:260px; top:640px; width:1100px; height:20px; opacity:.6;"></div>
+
+  <!-- CarPlay 自己的界面区域（依据 CarPlay 的布局：左侧侧边栏、右侧地图控件、底部提示） -->
+  <div style="position:absolute; left:0; top:0; bottom:0; width:186px;
+              background:rgba(255,80,80,.14); border-right:1px dashed rgba(255,120,120,.5);"></div>
+  <div style="position:absolute; left:14px; top:14px; font-size:15px; color:#ffd0d0; letter-spacing:.5px;">
+    CarPlay 侧边栏<br/>（图标列 / 时间 / 信号）
+  </div>
+  <div style="position:absolute; right:0; bottom:0; width:250px; height:250px;
+              background:rgba(255,180,80,.13); border-left:1px dashed rgba(255,190,110,.45);
+              border-top:1px dashed rgba(255,190,110,.45);"></div>
+  <div style="position:absolute; right:14px; bottom:14px; font-size:15px; color:#ffe3bb;
+              text-align:right;">地图控件 / 缩放<br/>（CarPlay 绘制）</div>
+
+  <!-- 我们建议的位置：底部中央一条窄坞，且默认隐藏 -->
+  <div style="position:absolute; left:50%; transform:translateX(-50%); bottom:22px; width:520px; height:86px;
+              border-radius:999px; border:1px dashed rgba(120,220,170,.55);
+              background:rgba(120,220,170,.10);"></div>
+  <div style="position:absolute; left:50%; transform:translateX(-50%); bottom:112px; font-size:16px;
+              color:#c9f5df; text-align:center;">建议位置：底部中央窄坞<br/>默认隐藏，底部上滑或轻触唤出</div>
+
+  <!-- 当前实现的位置（左下角按钮）需要挪动的原因 -->
+  <div style="position:absolute; left:14px; bottom:14px; width:170px; height:150px;
+              border-radius:16px; border:1px dashed rgba(255,120,120,.6);
+              background:rgba(255,80,80,.16);"></div>
+  <div style="position:absolute; left:24px; bottom:26px; width:150px; font-size:15px; color:#ffd0d0;">
+    现在的设置按钮<br/>压在这里<br/>（侧边栏底部）
+  </div>
+
+  <!-- 隐藏态提示 -->
+  <div class="glass" style="position:absolute; right:46px; top:46px; padding:14px 22px;
+       border-radius:999px; font-size:17px; color:var(--text-2);">
+    画面区域：不放任何常驻控件
+  </div>
+</section>
+
 </body>
 </html>
