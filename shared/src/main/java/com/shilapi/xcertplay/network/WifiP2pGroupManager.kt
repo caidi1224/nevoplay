@@ -17,7 +17,6 @@ import java.net.Inet6Address
 import java.net.InetAddress
 import java.net.NetworkInterface
 import java.net.SocketException
-import java.net.UnknownHostException
 import java.security.MessageDigest
 import java.util.Collections
 import java.util.concurrent.CountDownLatch
@@ -284,9 +283,15 @@ class WifiP2pGroupManager(
                     timeoutNanos = minOf(remainingNanos(deadlineNanos), REQUEST_POLL_NANOS),
                 )
             if (hostAddress == null) {
-                lastReason = "interface $interfaceName has no usable IPv6 or IPv4 address"
+                lastReason = "interface $interfaceName has no routable IPv4 or IPv6 address yet " +
+                    "(a link-local address is not usable by the phone)"
                 continue
             }
+            Log.i(
+                TAG,
+                "Wi-Fi P2P group ready ssid=$networkName interface=$interfaceName " +
+                    "address=${hostAddress.hostAddress} channel=$channelNumber",
+            )
 
             return WirelessHotspotInfo(
                 ssid = networkName,
@@ -335,7 +340,7 @@ class WifiP2pGroupManager(
         ensureStartActive(attempt)
         val info = result.get() ?: return null
         if (!info.groupFormed) return null
-        return info.groupOwnerAddress?.takeUnless(InetAddress::isAnyLocalAddress)
+        return info.groupOwnerAddress?.takeIf(::isAnnounceableAddress)
     }
 
     private fun await(latch: CountDownLatch, timeoutNanos: Long): Boolean = try {
@@ -346,23 +351,31 @@ class WifiP2pGroupManager(
         throw IOException("Interrupted while waiting for Wi-Fi P2P", interrupted)
     }
 
+    /**
+     * Returns the address the iPhone is told to reach us at.
+     *
+     * A bare link-local IPv6 address (`fe80::`) cannot be used by the phone across the P2P link, and
+     * announcing one made the app report a hotspot as ready while the phone could never join - the
+     * device log shows four starts that did exactly that. So IPv4 wins, a routable IPv6 is the
+     * fallback, and waiting for one of those beats announcing something unreachable.
+     */
     private fun interfaceAddress(interfaceName: String): InetAddress? {
         val networkInterface = networkInterface(interfaceName) ?: return null
-        var ipv4: InetAddress? = null
+        var routableIpv6: InetAddress? = null
         for (address in Collections.list(networkInterface.inetAddresses)) {
-            if (address is Inet6Address && address.isLinkLocalAddress) {
-                if (address.scopeId == networkInterface.index) return address
-                try {
-                    return Inet6Address.getByAddress(null, address.address, networkInterface)
-                } catch (_: UnknownHostException) {
-                    continue
-                }
-            }
-            if (address is Inet4Address && !address.isLoopbackAddress && ipv4 == null) {
-                ipv4 = address
-            }
+            if (!isAnnounceableAddress(address)) continue
+            if (address is Inet4Address) return address
+            if (address is Inet6Address && routableIpv6 == null) routableIpv6 = address
         }
-        return ipv4
+        return routableIpv6
+    }
+
+    private fun isAnnounceableAddress(address: InetAddress): Boolean = when {
+        address.isAnyLocalAddress || address.isLoopbackAddress -> false
+        address is Inet4Address -> true
+        // Link-local IPv6 has no scope outside this interface, so it must never be advertised.
+        address is Inet6Address -> !address.isLinkLocalAddress
+        else -> false
     }
 
     private fun interfaceHardwareAddress(interfaceName: String): String? =
