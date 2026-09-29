@@ -301,8 +301,8 @@ class CarPlayHostActivity : ComponentActivity() {
     private var maximumDetectedWidthPixels = 0
     private var maximumDetectedHeightPixels = 0
     private var rightHandDrive = false
-    private var hideTopBar = true
-    private var hideBottomBar = true
+    private var hideTopBar = false
+    private var hideBottomBar = false
     private var safeAreaDrawOutside = true
     private var locationReportingEnabled = false
     private var locationPermissionAvailable = false
