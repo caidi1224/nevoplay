@@ -823,8 +823,11 @@ class CarPlayHostActivity : ComponentActivity() {
             gravity = Gravity.CENTER_VERTICAL
         }
         brand.addView(
-            ImageView(this).apply { setImageResource(R.drawable.ic_brand) },
-            LinearLayout.LayoutParams(dp(48), dp(48)),
+            ImageView(this).apply {
+                setImageResource(R.mipmap.ic_launcher)
+                adjustViewBounds = true
+            },
+            LinearLayout.LayoutParams(GlassUi.sdp(this, 52), GlassUi.sdp(this, 52)),
         )
         brand.addView(
             GlassUi.text(this, "xcertplay", 27f, GlassUi.TEXT, bold = true).apply {
