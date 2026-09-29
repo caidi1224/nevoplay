@@ -659,6 +659,7 @@ class CarPlayHostActivity : ComponentActivity() {
     }
 
     private fun buildContentView(): View {
+        GlassUi.scale = menuScale()
         val root = FrameLayout(this).apply {
             setBackgroundColor(NO_VIDEO_BACKGROUND)
         }
@@ -815,7 +816,7 @@ class CarPlayHostActivity : ComponentActivity() {
     private fun buildIdleHome(): View {
         val column = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(56), dp(40), dp(56), dp(40))
+            setPadding(GlassUi.sdp(this, 56), GlassUi.sdp(this, 40), GlassUi.sdp(this, 56), GlassUi.sdp(this, 40))
         }
 
         val brand = LinearLayout(this).apply {
@@ -831,7 +832,7 @@ class CarPlayHostActivity : ComponentActivity() {
         )
         brand.addView(
             GlassUi.text(this, "xcertplay", 27f, GlassUi.TEXT, bold = true).apply {
-                setPadding(dp(16), 0, 0, 0)
+                setPadding(GlassUi.sdp(this, 16), 0, 0, 0)
             },
         )
         column.addView(brand, GlassUi.block(this))
@@ -844,7 +845,7 @@ class CarPlayHostActivity : ComponentActivity() {
                 GlassUi.TEXT_TERTIARY,
                 bold = true,
                 letterSpacing = 0.18f,
-            ).apply { setPadding(0, dp(72), 0, 0) },
+            ).apply { setPadding(0, GlassUi.sdp(this, 72), 0, 0) },
             GlassUi.block(this),
         )
         column.addView(
@@ -863,10 +864,10 @@ class CarPlayHostActivity : ComponentActivity() {
 
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(30), dp(28), dp(30), dp(28))
+            setPadding(GlassUi.sdp(this, 30), GlassUi.sdp(this, 28), GlassUi.sdp(this, 30), GlassUi.sdp(this, 28))
             background = GlassUi.glass(GlassUi.RADIUS_XL)
             clipToOutline = true
-            elevation = dp(8).toFloat()
+            elevation = GlassUi.sdp(this, 8).toFloat()
         }
         card.addView(
             GlassUi.text(
@@ -1571,9 +1572,7 @@ class CarPlayHostActivity : ComponentActivity() {
         }
 
     /** Text sizes are authored for a 1080p-wide panel; scale them up on larger panels. */
-    private fun menuTextScale(): Float =
-        (resources.displayMetrics.widthPixels / MENU_TEXT_SCALE_REFERENCE_WIDTH_PX)
-            .coerceIn(1f, MENU_TEXT_SCALE_MAX)
+    private fun menuTextScale(): Float = menuScale()
 
     private fun scaleMenuTextSize(root: View, scale: Float) {
         if (scale <= 1.001f) return
@@ -1649,7 +1648,7 @@ class CarPlayHostActivity : ComponentActivity() {
 
             val column = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
-                setPadding(dp(40), dp(40), dp(40), dp(160))
+                setPadding(GlassUi.sdp(this, 40), GlassUi.sdp(this, 40), GlassUi.sdp(this, 40), GlassUi.sdp(this, 160))
                 addView(GlassUi.sectionLabel(this@CarPlayHostActivity, name), GlassUi.block(this@CarPlayHostActivity))
                 addView(card, GlassUi.block(this@CarPlayHostActivity, 12))
                 addView(
@@ -1689,7 +1688,7 @@ class CarPlayHostActivity : ComponentActivity() {
         if (footer.isNotEmpty()) {
             val bar = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
-                setPadding(dp(40), dp(14), dp(40), dp(20))
+                setPadding(GlassUi.sdp(this, 40), GlassUi.sdp(this, 14), GlassUi.sdp(this, 40), GlassUi.sdp(this, 20))
                 background = GlassUi.glass(GlassUi.RADIUS_XL, strong = true)
             }
             footer.forEach { view ->
@@ -1699,7 +1698,7 @@ class CarPlayHostActivity : ComponentActivity() {
                     LinearLayout.LayoutParams(
                         LinearLayout.LayoutParams.MATCH_PARENT,
                         LinearLayout.LayoutParams.WRAP_CONTENT,
-                    ).apply { topMargin = dp(6) },
+                    ).apply { topMargin = GlassUi.sdp(this, 6) },
                 )
             }
             panel.addView(
@@ -1709,9 +1708,9 @@ class CarPlayHostActivity : ComponentActivity() {
                     FrameLayout.LayoutParams.WRAP_CONTENT,
                     Gravity.BOTTOM,
                 ).apply {
-                    leftMargin = dp(24)
-                    rightMargin = dp(24)
-                    bottomMargin = dp(20)
+                    leftMargin = GlassUi.sdp(this, 24)
+                    rightMargin = GlassUi.sdp(this, 24)
+                    bottomMargin = GlassUi.sdp(this, 20)
                 },
             )
         }
@@ -4393,7 +4392,21 @@ class CarPlayHostActivity : ComponentActivity() {
         }
     }
 
-    private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
+    /**
+     * Density-independent size that also follows the panel's resolution.
+     *
+     * Sizes throughout this file were authored against a 1080p-wide panel. On a 2560x1600 head unit
+     * that leaves cards, paddings and touch targets phone-sized, so everything is scaled by the same
+     * factor the text already uses. Scaling here rather than at each call site keeps the 112 existing
+     * uses consistent and means a future panel needs no per-layout tuning.
+     */
+    private fun dp(value: Int): Int =
+        (value * menuScale() * resources.displayMetrics.density).toInt()
+
+    /** The single layout/text scale for this panel, derived from its width. */
+    private fun menuScale(): Float =
+        (resources.displayMetrics.widthPixels / MENU_TEXT_SCALE_REFERENCE_WIDTH_PX)
+            .coerceIn(MENU_LAYOUT_SCALE_MIN, MENU_LAYOUT_SCALE_MAX)
 
     private fun CarPlayStatus.describe(): String = when (this) {
         CarPlayStatus.DiscoveringMfi -> "Preparing MFi authentication"
@@ -4454,6 +4467,8 @@ class CarPlayHostActivity : ComponentActivity() {
         const val LANDSCAPE_SETTINGS_WIDTH_FRACTION = 0.96f
         const val MENU_TEXT_SCALE_REFERENCE_WIDTH_PX = 1920f
         const val MENU_TEXT_SCALE_MAX = 1.5f
+        const val MENU_LAYOUT_SCALE_MIN = 1f
+        const val MENU_LAYOUT_SCALE_MAX = 1.6f
         const val SETTINGS_COLUMN_GAP_DP = 48
         const val MENU_CATEGORY_TAG = "settings-category"
         const val MENU_FOOTER_TAG = "settings-footer"

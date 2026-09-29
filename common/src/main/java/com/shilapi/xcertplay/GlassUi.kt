@@ -47,8 +47,25 @@ internal object GlassUi {
     const val RADIUS_MD = 16
     const val RADIUS_PILL = 999
 
+    /**
+     * Layout scale for the panel in front of us, set once per activity from the display metrics.
+     *
+     * Authoring sizes assume a 1080p-wide panel; a 2560x1600 head unit needs everything - paddings,
+     * icon boxes, button heights - about a third larger, not just the text. Without this, cards and
+     * touch targets stay phone-sized on a very large screen.
+     */
+    @Volatile var scale: Float = 1f
+
     fun dp(context: Context, value: Int): Int =
         (value * context.resources.displayMetrics.density).toInt()
+
+    /** Density-independent size that also follows the panel's resolution. */
+    fun sdp(context: Context, value: Int): Int =
+        (value * scale * context.resources.displayMetrics.density).toInt()
+
+    /** Layout params sized by [sdp]; the shell for every fixed-size element. */
+    fun sized(context: Context, widthDp: Int, heightDp: Int = widthDp): LinearLayout.LayoutParams =
+        LinearLayout.LayoutParams(ssdp(context, widthDp), ssdp(context, heightDp))
 
     /** Translucent "glass" panel: soft vertical wash, hairline edge, bright top highlight. */
     fun glass(radiusDp: Int, strong: Boolean = false): GradientDrawable {
@@ -100,7 +117,7 @@ internal object GlassUi {
     /** Small uppercase label above a group, the way iOS names a settings section. */
     fun sectionLabel(context: Context, value: String): TextView =
         text(context, value.uppercase(), 13f, TEXT_TERTIARY, bold = true, letterSpacing = 0.16f).apply {
-            setPadding(dp(context, 10), 0, 0, 0)
+            setPadding(sdp(context, 10), 0, 0, 0)
         }
 
     /** A grouped card: children stacked with hairline separators drawn by [addRow]. */
@@ -108,7 +125,7 @@ internal object GlassUi {
         orientation = LinearLayout.VERTICAL
         background = card(RADIUS_LG)
         clipToOutline = true
-        elevation = dp(context, 6).toFloat()
+        elevation = sdp(context, 6).toFloat()
     }
 
     /** Adds a row to a [group], with a hairline above every row except the first. */
@@ -137,7 +154,7 @@ internal object GlassUi {
     fun row(context: Context): LinearLayout = LinearLayout(context).apply {
         orientation = LinearLayout.HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
-        setPadding(dp(context, 24), dp(context, 20), dp(context, 24), dp(context, 20))
+        setPadding(sdp(context, 24), sdp(context, 20), sdp(context, 24), sdp(context, 20))
     }
 
     /** Large tappable destination card used on the settings root. */
@@ -151,17 +168,17 @@ internal object GlassUi {
         val row = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(context, 22), dp(context, 20), dp(context, 22), dp(context, 20))
+            setPadding(sdp(context, 22), sdp(context, 20), sdp(context, 22), sdp(context, 20))
             background = ripple(context, glass(RADIUS_LG))
             isClickable = true
             isFocusable = true
             clipToOutline = true
-            elevation = dp(context, 4).toFloat()
+            elevation = sdp(context, 4).toFloat()
         }
         row.addView(
             glyph,
-            LinearLayout.LayoutParams(dp(context, 54), dp(context, 54)).apply {
-                rightMargin = dp(context, 20)
+            LinearLayout.LayoutParams(sdp(context, 54), sdp(context, 54)).apply {
+                rightMargin = sdp(context, 20)
             },
         )
         val labels = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
@@ -169,7 +186,7 @@ internal object GlassUi {
         if (subtitle.isNotEmpty()) {
             labels.addView(
                 text(context, subtitle, 16f, TEXT_TERTIARY).apply {
-                    setPadding(0, dp(context, 4), 0, 0)
+                    setPadding(0, sdp(context, 4), 0, 0)
                 },
             )
         }
@@ -184,7 +201,7 @@ internal object GlassUi {
         gravity = Gravity.CENTER
         background = GradientDrawable().apply {
             shape = GradientDrawable.RECTANGLE
-            cornerRadius = dp(context, RADIUS_MD).toFloat()
+            cornerRadius = sdp(context, RADIUS_MD).toFloat()
             setColor(Color.argb(40, Color.red(ACCENT), Color.green(ACCENT), Color.blue(ACCENT)))
             setStroke(dp1(false), Color.argb(70, Color.red(ACCENT), Color.green(ACCENT), Color.blue(ACCENT)))
         }
@@ -201,18 +218,18 @@ internal object GlassUi {
     fun primaryButton(context: Context, label: String, onClick: () -> Unit): View {
         val view = text(context, label, 24f, ACCENT_INK, bold = true).apply {
             gravity = Gravity.CENTER
-            setPadding(0, dp(context, 22), 0, dp(context, 22))
+            setPadding(0, sdp(context, 22), 0, sdp(context, 22))
             background = ripple(
                 context,
                 GradientDrawable(
                     GradientDrawable.Orientation.TOP_BOTTOM,
                     intArrayOf(Color.rgb(190, 245, 214), ACCENT),
-                ).apply { cornerRadius = dp(context, RADIUS_PILL).toFloat() },
+                ).apply { cornerRadius = sdp(context, RADIUS_PILL).toFloat() },
             )
             isClickable = true
             isFocusable = true
             clipToOutline = true
-            elevation = dp(context, 6).toFloat()
+            elevation = sdp(context, 6).toFloat()
         }
         view.setOnClickListener { onClick() }
         return view
@@ -221,7 +238,7 @@ internal object GlassUi {
     fun ghostButton(context: Context, label: String, onClick: () -> Unit): View {
         val view = text(context, label, 22f, TEXT, bold = false).apply {
             gravity = Gravity.CENTER
-            setPadding(0, dp(context, 20), 0, dp(context, 20))
+            setPadding(0, sdp(context, 20), 0, sdp(context, 20))
             background = ripple(context, glass(RADIUS_PILL))
             isClickable = true
             isFocusable = true
@@ -240,9 +257,9 @@ internal object GlassUi {
             bold = active,
         ).apply {
             gravity = Gravity.CENTER
-            setPadding(dp(context, 22), dp(context, 14), dp(context, 22), dp(context, 14))
+            setPadding(sdp(context, 22), sdp(context, 14), sdp(context, 22), sdp(context, 14))
             background = GradientDrawable().apply {
-                cornerRadius = dp(context, RADIUS_PILL).toFloat()
+                cornerRadius = sdp(context, RADIUS_PILL).toFloat()
                 setColor(
                     if (active) {
                         Color.argb(48, Color.red(ACCENT), Color.green(ACCENT), Color.blue(ACCENT))
@@ -283,7 +300,7 @@ internal object GlassUi {
     fun spacer(context: Context, heightDp: Int): View = View(context).apply {
         layoutParams = LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT,
-            dp(context, heightDp),
+            sdp(context, heightDp),
         )
     }
 
@@ -295,14 +312,14 @@ internal object GlassUi {
         LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT,
             ViewGroup.LayoutParams.WRAP_CONTENT,
-        ).apply { topMargin = dp(context, topMarginDp) }
+        ).apply { topMargin = sdp(context, topMarginDp) }
 
     fun frameBlock(context: Context, topMarginDp: Int = 0, leftMarginDp: Int = 0): FrameLayout.LayoutParams =
         FrameLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT,
             ViewGroup.LayoutParams.WRAP_CONTENT,
         ).apply {
-            topMargin = dp(context, topMarginDp)
-            leftMargin = dp(context, leftMarginDp)
+            topMargin = sdp(context, topMarginDp)
+            leftMargin = sdp(context, leftMarginDp)
         }
 }
