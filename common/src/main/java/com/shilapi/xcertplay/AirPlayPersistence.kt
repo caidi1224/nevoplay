@@ -70,7 +70,9 @@ object AirPlayPersistence {
 
     const val DEFAULT_MANUFACTURER = "xcertplay"
     const val DEFAULT_MODEL = "xcertplay"
-    const val DEFAULT_OEM_LABEL = ""
+
+    /** Shown by CarPlay under the OEM icon (the vehicle's own brand). */
+    const val DEFAULT_OEM_LABEL = "长安启源"
     const val DEFAULT_MFI_I2C_PATH = "/dev/i2c-1"
 
     fun loadDisplayScaleTenths(context: Context): Int {
@@ -331,10 +333,12 @@ object AirPlayPersistence {
             .apply()
     }
 
+    /** A blank stored label means "use the default", matching manufacturer and model. */
     fun loadOemLabel(context: Context): String =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .getString(KEY_OEM_LABEL, DEFAULT_OEM_LABEL)
-            .orEmpty()
+            .getString(KEY_OEM_LABEL, null)
+            ?.takeIf { it.isNotBlank() }
+            ?: DEFAULT_OEM_LABEL
 
     fun saveOemLabel(context: Context, oemLabel: String) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()

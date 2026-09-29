@@ -3025,7 +3025,7 @@ class CarPlayHostActivity : ComponentActivity() {
             microphone = microphoneAvailable,
             manufacturer = normalizedManufacturer(),
             model = normalizedModel(),
-            oemLabel = oemLabel,
+            oemLabel = normalizedOemLabel(),
             icons = listOf(loadAirPlayIcon()),
         )
     }
@@ -3174,6 +3174,9 @@ class CarPlayHostActivity : ComponentActivity() {
 
     private fun normalizedModel(): String =
         model.trim().ifBlank { AirPlayPersistence.DEFAULT_MODEL }
+
+    private fun normalizedOemLabel(): String =
+        oemLabel.trim().ifBlank { AirPlayPersistence.DEFAULT_OEM_LABEL }
 
     private fun createMediaSink(
         videoWidth: Int,
