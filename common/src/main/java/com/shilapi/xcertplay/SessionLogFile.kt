@@ -46,6 +46,12 @@ internal interface SessionLogSink {
 
     /** Bytes already present, or 0 when unknown. */
     fun sizeBytes(): Long
+
+    /**
+     * Renames an archived generation by name, independent of which document the sink currently
+     * points at. Returns false when that name does not exist.
+     */
+    fun renameArchived(from: String, to: String): Boolean
 }
 
 internal class FileSessionLogSink(private val file: File) : SessionLogSink {
@@ -62,6 +68,12 @@ internal class FileSessionLogSink(private val file: File) : SessionLogSink {
     }
 
     override fun sizeBytes(): Long = if (file.isFile) file.length() else 0L
+
+    override fun renameArchived(from: String, to: String): Boolean {
+        val source = File(file.parentFile, from)
+        if (!source.isFile) return false
+        return runCatching { source.renameTo(File(file.parentFile, to)) }.getOrDefault(false)
+    }
 }
 
 /** Writes to `Download/xcertplay/xcertplay.log` through the media store. */
@@ -86,6 +98,34 @@ internal class MediaStoreSessionLogSink(private val context: Context) : SessionL
             ?: throw IOException("Log destination $displayPath could not be opened for appending")
     }
 
+    override fun renameArchived(from: String, to: String): Boolean {
+        val resolver = context.contentResolver
+        val uri = findDocument(resolver, from) ?: return false
+        val renamed = runCatching {
+            resolver.update(
+                uri,
+                ContentValues().apply { put(MediaStore.MediaColumns.DISPLAY_NAME, to) },
+                null,
+                null,
+            )
+        }.getOrDefault(0) > 0
+        // The current session may have been renamed out from under this sink.
+        if (renamed && from == LOG_FILE_NAME) documentUri = null
+        return renamed
+    }
+
+    /** Finds an existing document by name without creating one. */
+    private fun findDocument(resolver: ContentResolver, name: String): Uri? =
+        resolver.query(
+            collection,
+            arrayOf(MediaStore.MediaColumns._ID),
+            "${MediaStore.MediaColumns.DISPLAY_NAME}=? AND ${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ?",
+            arrayOf(name, "$relativePath%"),
+            null,
+        )?.use { cursor ->
+            if (cursor.moveToFirst()) ContentUris.withAppendedId(collection, cursor.getLong(0)) else null
+        }
+
     override fun sizeBytes(): Long {
         val resolver = context.contentResolver
         val uri = documentUri ?: resolveDocument(resolver).also { documentUri = it }
@@ -98,16 +138,7 @@ internal class MediaStoreSessionLogSink(private val context: Context) : SessionL
 
     /** Reuses the document written by an earlier session so the log stays one file. */
     private fun resolveDocument(resolver: ContentResolver): Uri {
-        val existing = resolver.query(
-            collection,
-            arrayOf(MediaStore.MediaColumns._ID),
-            "${MediaStore.MediaColumns.DISPLAY_NAME}=? AND ${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ?",
-            arrayOf(LOG_FILE_NAME, "$relativePath%"),
-            null,
-        )?.use { cursor ->
-            if (cursor.moveToFirst()) ContentUris.withAppendedId(collection, cursor.getLong(0)) else null
-        }
-        if (existing != null) return existing
+        findDocument(resolver, LOG_FILE_NAME)?.let { return it }
 
         val values = ContentValues().apply {
             put(MediaStore.MediaColumns.DISPLAY_NAME, LOG_FILE_NAME)
@@ -155,17 +186,26 @@ internal class SessionLogFile(private val sink: SessionLogSink) : Closeable {
         synchronized(lock) {
             if (closed) return
             output?.close()
-            val existing = runCatching { sink.sizeBytes() }.getOrDefault(0L)
-            if (existing >= MAX_BYTES) {
-                output = sink.openTruncating().buffered()
-                bytesWritten = 0L
-                writeLine("previous log discarded: reached ${MAX_BYTES / (1024 * 1024)} MiB")
-            } else {
-                output = sink.openAppending().buffered()
-                bytesWritten = existing
-            }
+            output = null
+            // Rotate rather than replace. A freeze usually ends with the app being force-stopped, and
+            // a log that starts over on every launch (or at the size cap) throws away exactly the
+            // session that needs explaining. Old generations stay readable instead.
+            rotate()
+            output = runCatching { sink.openAppending().buffered() }
+                .onFailure { append("log destination unavailable: ${it.message}") }
+                .getOrNull()
+            bytesWritten = 0L
             writeLine(header)
         }
+    }
+
+    /** Shifts the archive chain, oldest first, then moves the just-finished session into it. */
+    private fun rotate() {
+        for (index in ARCHIVE_NAMES.indices.reversed()) {
+            val to = ARCHIVE_NAMES.getOrNull(index + 1) ?: continue
+            runCatching { sink.renameArchived(ARCHIVE_NAMES[index], to) }
+        }
+        runCatching { sink.renameArchived(LOG_FILE_NAME, ARCHIVE_NAMES.first()) }
     }
 
     fun append(line: String) = enqueue { line }
@@ -189,7 +229,8 @@ internal class SessionLogFile(private val sink: SessionLogSink) : Closeable {
     }
 
     private fun writeLine(line: String) {
-        var bytes = line.toByteArray(StandardCharsets.UTF_8)
+        val redacted = DiagnosticRedactor.redact(line) ?: return
+        var bytes = redacted.toByteArray(StandardCharsets.UTF_8)
         if (bytes.size >= MAX_BYTES) {
             var start = bytes.size - (MAX_BYTES - 1)
             while (start < bytes.size && bytes[start].toInt() and 0xc0 == 0x80) start++
@@ -197,8 +238,12 @@ internal class SessionLogFile(private val sink: SessionLogSink) : Closeable {
         }
         if (bytesWritten + bytes.size + 1 > MAX_BYTES) {
             output?.close()
-            output = sink.openTruncating().buffered()
+            output = null
+            // Rotate instead of starting over: the previous generation stays on disk.
+            rotate()
+            output = runCatching { sink.openAppending().buffered() }.getOrNull() ?: return
             bytesWritten = 0L
+            writeLine("log rotated: reached ${MAX_BYTES / 1024} KiB")
         }
         val activeOutput = output ?: return
         activeOutput.write(bytes)
@@ -221,7 +266,11 @@ internal class SessionLogFile(private val sink: SessionLogSink) : Closeable {
     }
 
     private companion object {
-        const val MAX_BYTES = 10 * 1024 * 1024
+        /** Per-file cap. With rotation this bounds one generation, not the whole history. */
+        const val MAX_BYTES = 1024 * 1024
+        const val LOG_FILE_NAME = "xcertplay.log"
+        val ARCHIVE_NAMES = listOf("xcertplay.previous.log") +
+            (2..7).map { "xcertplay.previous-$it.log" }
         const val MAX_PENDING_LINES = 1024
     }
 }
