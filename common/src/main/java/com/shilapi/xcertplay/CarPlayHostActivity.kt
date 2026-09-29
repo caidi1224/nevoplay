@@ -591,7 +591,13 @@ class CarPlayHostActivity : ComponentActivity() {
             darkMode = nextDarkMode
             syncAirPlayDarkMode()
         }
-        applyFullscreenMode()
+        // Deliberately no applyFullscreenMode() here. A head unit that insists on showing its own
+        // status bar (typically as soon as the car is in gear) reports a new screen size, and
+        // re-hiding the bar on every such change turns into a fight: the vehicle shows it again,
+        // the window flips back, and each flip used to trigger another CarPlay re-handshake. The
+        // hide request made at startup/resume stays in effect, so the bar simply follows whatever
+        // the vehicle allows; fullscreen is re-asserted by onResume, onWindowFocusChanged, the
+        // Settings switches and the baseline restore.
         stageStatusView?.maxWidth = (resources.displayMetrics.widthPixels * 0.78f).toInt()
         scrollLogsToBottom()
         videoView?.post {
@@ -3389,7 +3395,18 @@ class CarPlayHostActivity : ComponentActivity() {
     private fun scheduleDisplaySize(width: Int, height: Int) {
         if (width <= 0 || height <= 0 || shuttingDown.get()) return
         val size = DisplaySize(width, height)
-        if (size == activeDisplaySize || size == pendingDisplaySize) return
+        if (size == activeDisplaySize) {
+            // The window came back to the size we already run at: drop the queued change instead of
+            // re-handshaking twice for a resize that has been undone (a vehicle status bar that
+            // appears and disappears, a display that renegotiates twice, a rotation that reverts).
+            if (pendingDisplaySize != null) {
+                pendingDisplaySize = null
+                mainHandler.removeCallbacks(applyDisplaySize)
+                appendLog("Display returned to ${size.width}x${size.height}; pending change dropped")
+            }
+            return
+        }
+        if (size == pendingDisplaySize) return
         pendingDisplaySize = size
         mainHandler.removeCallbacks(applyDisplaySize)
         mainHandler.postDelayed(applyDisplaySize, DISPLAY_CHANGE_DEBOUNCE_MILLIS)
