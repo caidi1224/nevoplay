@@ -1538,9 +1538,7 @@ class CarPlayHostActivity : ComponentActivity() {
             }
         }
 
-        if (settingsMenuIsLandscape()) {
-            splitSettingsMenuIntoColumns(content)
-        }
+        arrangeSettingsAsPages(content, panel, scroll)
         scaleMenuTextSize(overlay, menuTextScale())
 
         resolutionValueView = resolutionValue
@@ -1584,6 +1582,137 @@ class CarPlayHostActivity : ComponentActivity() {
                 scaleMenuTextSize(root.getChildAt(index), scale)
             }
         }
+    }
+
+    /**
+     * Turns the column [buildSettingsMenu] assembled into two levels: a root page listing the
+     * categories, and one page per category holding that category's rows in a glass card.
+     *
+     * The partition is by tag, the same way the earlier two-column layout worked: a row tagged
+     * [MENU_CATEGORY_TAG] starts a category, and rows tagged [MENU_FOOTER_TAG] are pulled out into a
+     * bar pinned to the panel so "save and reconnect" stays reachable from every page. Nothing about
+     * how the rows themselves are built or read changes - they are moved, not rebuilt.
+     */
+    private fun arrangeSettingsAsPages(content: LinearLayout, panel: FrameLayout, rootScroll: View) {
+        if (content.childCount < 3) return
+
+        val title = content.getChildAt(0)
+        val footer = mutableListOf<View>()
+        val groups = mutableListOf<MutableList<View>>()
+        for (index in 1 until content.childCount) {
+            val child = content.getChildAt(index)
+            when {
+                child.tag == MENU_FOOTER_TAG -> footer.add(child)
+                else -> {
+                    if (groups.isEmpty() || child.tag == MENU_CATEGORY_TAG) groups.add(mutableListOf())
+                    groups.last().add(child)
+                }
+            }
+        }
+        if (groups.isEmpty()) return
+
+        content.removeAllViews()
+        val pageHost = FrameLayout(this)
+        panel.addView(
+            pageHost,
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT,
+            ),
+        )
+        val pages = mutableListOf<View>()
+        val showRoot = {
+            rootScroll.visibility = View.VISIBLE
+            pages.forEach { it.visibility = View.GONE }
+        }
+        val showPage: (Int) -> Unit = { index ->
+            rootScroll.visibility = View.GONE
+            pages.forEachIndexed { position, page -> page.visibility = if (position == index) View.VISIBLE else View.GONE }
+        }
+
+        (title as? TextView)?.let { heading ->
+            heading.setPadding(0, 0, 0, 0)
+            content.addView(heading, GlassUi.block(this))
+        }
+
+        groups.forEachIndexed { index, group ->
+            val label = group.firstOrNull { it.tag == MENU_CATEGORY_TAG }
+            val name = ((label as? TextView)?.text?.toString() ?: "Settings").trim()
+
+            val card = GlassUi.group(this)
+            group.forEach { view ->
+                if (view.tag != MENU_CATEGORY_TAG) GlassUi.addRow(card, view)
+            }
+
+            val column = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(40), dp(40), dp(40), dp(160))
+                addView(GlassUi.sectionLabel(this@CarPlayHostActivity, name), GlassUi.block(this@CarPlayHostActivity))
+                addView(card, GlassUi.block(this@CarPlayHostActivity, 12))
+                addView(
+                    GlassUi.ghostButton(this@CarPlayHostActivity, "\u2039  返回") { showRoot() },
+                    GlassUi.block(this@CarPlayHostActivity, 26),
+                )
+            }
+            scaleMenuTextSize(column, menuTextScale())
+            val page = ScrollView(this).apply {
+                isFillViewport = false
+                visibility = View.GONE
+                addView(
+                    column,
+                    ViewGroup.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ),
+                )
+            }
+            pages.add(page)
+            pageHost.addView(
+                page,
+                FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                ),
+            )
+
+            content.addView(
+                GlassUi.categoryCard(this, name, "") {
+                    showPage(index)
+                },
+                GlassUi.block(this, 14),
+            )
+        }
+
+        if (footer.isNotEmpty()) {
+            val bar = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(40), dp(14), dp(40), dp(20))
+                background = GlassUi.glass(GlassUi.RADIUS_XL, strong = true)
+            }
+            footer.forEach { view ->
+                (view.parent as? ViewGroup)?.removeView(view)
+                bar.addView(
+                    view,
+                    LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                    ).apply { topMargin = dp(6) },
+                )
+            }
+            panel.addView(
+                bar,
+                FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.WRAP_CONTENT,
+                    Gravity.BOTTOM,
+                ).apply {
+                    leftMargin = dp(24)
+                    rightMargin = dp(24)
+                    bottomMargin = dp(20)
+                },
+            )
+        }
+        showRoot()
     }
 
     /**
