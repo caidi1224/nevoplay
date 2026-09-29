@@ -1676,7 +1676,7 @@ class CarPlayHostActivity : ComponentActivity() {
             )
 
             content.addView(
-                GlassUi.categoryCard(this, name, "") {
+                GlassUi.categoryCard(this, name, "", GlassUi.accentDot(this)) {
                     showPage(index)
                 },
                 GlassUi.block(this, 14),

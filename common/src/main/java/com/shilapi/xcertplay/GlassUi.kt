@@ -190,6 +190,14 @@ internal object GlassUi {
         }
     }
 
+    /** Small accent dot used where a category would otherwise need its own icon asset. */
+    fun accentDot(context: Context): View = View(context).apply {
+        background = GradientDrawable().apply {
+            shape = GradientDrawable.OVAL
+            setColor(ACCENT)
+        }
+    }
+
     fun primaryButton(context: Context, label: String, onClick: () -> Unit): View {
         val view = text(context, label, 24f, ACCENT_INK, bold = true).apply {
             gravity = Gravity.CENTER
