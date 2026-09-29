@@ -26,6 +26,13 @@ class ScreenStream(private val key: ByteArray) : Closeable {
         fun onConfig(codecData: ByteArray) {}
         fun onFrame(naluBytes: ByteArray) {}
         fun onClosed(cause: Throwable?) {}
+
+        /**
+         * Lifecycle and decode diagnostics. [android.util.Log] alone is not enough: the session log
+         * file is fed by the AirPlay layer's callback, so anything logged only to logcat is invisible
+         * in a bug report - which is exactly how "no picture" stayed unexplained.
+         */
+        fun onLog(message: String) {}
     }
 
     private var nalLengthSize = 4
@@ -37,6 +44,11 @@ class ScreenStream(private val key: ByteArray) : Closeable {
     private var thread: Thread? = null
     @Volatile private var listener: Listener = object : Listener {}
 
+    private fun log(message: String) {
+        Log.i(TAG, message)
+        listener.onLog(message)
+    }
+
     fun listen(listener: Listener): Int {
         this.listener = listener
         val bound = ServerSocket()
@@ -46,7 +58,7 @@ class ScreenStream(private val key: ByteArray) : Closeable {
         thread = Thread({ accept(bound) }, "airplay-screen").apply { isDaemon = true; start() }
         // Without this the log could not tell "the phone never connected" from "it connected and sent
         // nothing", which is the first thing a missing picture needs to be narrowed down to.
-        Log.i(TAG, "screen stream listening address=:: port=${bound.localPort}")
+        log("screen stream listening address=:: port=${bound.localPort}")
         return bound.localPort
     }
 
@@ -61,7 +73,7 @@ class ScreenStream(private val key: ByteArray) : Closeable {
         try {
             val accepted = bound.accept()
             socket = accepted
-            Log.i(TAG, "screen stream connection from ${accepted.remoteSocketAddress}")
+            log("screen stream connection from ${accepted.remoteSocketAddress}")
             run(accepted)
         } catch (error: Exception) {
             if (!closed.get()) listener.onClosed(error)
@@ -90,7 +102,7 @@ class ScreenStream(private val key: ByteArray) : Closeable {
             if (socket === sock) socket = null
             safeClose(sock)
             // The byte count is what separates a silent peer from a peer that never showed up.
-            Log.i(TAG, "screen stream peer finished bytes=$bytes messages=$messages")
+            log("screen stream peer finished bytes=$bytes messages=$messages")
             if (!closed.get()) listener.onClosed(failure)
         }
     }
@@ -105,8 +117,7 @@ class ScreenStream(private val key: ByteArray) : Closeable {
                     body
                 }
                 if (firstFrameLogged.compareAndSet(false, true)) {
-                    Log.i(
-                        TAG,
+                    log(
                         "video first decrypted frame sealed=${body.size} plain=${payload.size} " +
                         "head=${payload.hexPrefix(16)}",
                     )
@@ -115,7 +126,7 @@ class ScreenStream(private val key: ByteArray) : Closeable {
             }
             OP_VIDEO_CONFIG -> {
                 val (codec, codecData) = ScreenCodec.detectConfig(body)
-                Log.i(TAG, "video codec config codec=$codec body=${body.size} data=${codecData.size}")
+                log("video codec config codec=$codec body=${body.size} data=${codecData.size}")
                 val lengthOffset = if (codec == VideoCodec.H265) 21 else 4
                 require(codecData.size > lengthOffset) { "Truncated video configuration" }
                 nalLengthSize = (codecData[lengthOffset].toInt() and 3) + 1

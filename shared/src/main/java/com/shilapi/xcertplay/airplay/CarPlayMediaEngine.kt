@@ -69,7 +69,9 @@ class CarPlayMediaEngine(
     override fun onScreen(session: AirPlaySession, type: Int, stream: Map<String, Any?>): Int? {
         val key = outputKey(session, stream) ?: return null
         val streamKey = StreamKey(session, type)
-        Log.i(TAG, "airplay screen key connectionID=${unsignedPlistDecimal(stream["streamConnectionID"])}")
+        val connectionId = unsignedPlistDecimal(stream["streamConnectionID"])
+        Log.i(TAG, "airplay screen key connectionID=$connectionId")
+        session.logDebug("airplay screen key connectionID=$connectionId")
         val screen = ScreenStream(key)
         // The no-display-UUID forceKeyFrame command targets the primary screen.
         // Do not accidentally restart the main screen when the alternate decoder loses sync.
@@ -80,14 +82,14 @@ class CarPlayMediaEngine(
         }
         val port = screen.listen(
             object : ScreenStream.Listener {
+                override fun onLog(message: String) = session.logDebug(message)
                 override fun onCodec(codec: VideoCodec) = sink.onVideoCodec(type, codec)
                 override fun onConfig(codecData: ByteArray) = sink.onVideoConfig(type, codecData)
                 override fun onFrame(naluBytes: ByteArray) = sink.onVideoFrame(type, naluBytes)
                 override fun onClosed(cause: Throwable?) {
-                    Log.w(
-                        TAG,
-                        "screen stream ended type=$type reason=${cause?.message ?: "peer EOF"}",
-                    )
+                    val reason = cause?.message ?: "peer EOF"
+                    Log.w(TAG, "screen stream ended type=$type reason=$reason")
+                    session.logDebug("screen stream ended type=$type reason=$reason")
                     if (streams.remove(streamKey, screen)) {
                         sink.onVideoRecoveryHandler(type, null)
                         sink.onScreenStreamActive(type, false)

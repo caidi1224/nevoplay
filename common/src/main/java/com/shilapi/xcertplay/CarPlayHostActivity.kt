@@ -291,6 +291,7 @@ class CarPlayHostActivity : ComponentActivity() {
     private var advancedAudioChannelMappingSupported = false
     private var advancedAudioChannelMapping = false
     @Volatile private var debugLogsEnabled = false
+    private var lastStageOverlayShown: Boolean? = null
     private var moreGesturesToSettings = false
     private var autoStartOnBoot = false
     private var manufacturer = AirPlayPersistence.DEFAULT_MANUFACTURER
@@ -3815,6 +3816,13 @@ class CarPlayHostActivity : ComponentActivity() {
             } else {
                 activeScreenStreamTypes.remove(type)
             }
+            // The stage banner ("...control running") is only hidden while a screen stream is
+            // considered active, so whether the host noticed the stream is part of the picture
+            // problem and belongs in the log.
+            appendLog(
+                "screen stream ${if (active) "active" else "inactive"} type=$type " +
+                    "active=$activeScreenStreamTypes",
+            )
             updateDebugOverlays()
         }
     }
@@ -3841,6 +3849,13 @@ class CarPlayHostActivity : ComponentActivity() {
             !menuOpen &&
             activeScreenStreamTypes.isEmpty()
         stageStatusView?.visibility = if (showStage) View.VISIBLE else View.GONE
+        if (showStage != lastStageOverlayShown) {
+            lastStageOverlayShown = showStage
+            appendLog(
+                "stage banner ${if (showStage) "shown" else "hidden"} " +
+                    "debugLogs=$debugLogsEnabled menu=$menuOpen active=$activeScreenStreamTypes",
+            )
+        }
     }
 
     private fun appendLog(message: String) {
