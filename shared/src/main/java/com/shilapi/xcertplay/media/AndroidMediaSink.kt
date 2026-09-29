@@ -175,6 +175,7 @@ private class VideoDecoder(
     private var renderedFrameLogged = false
     private var submittedFrameLogged = false
     private var duplicateConfigLogged = false
+    private var awaitingConfigLogged = false
     private val thread = Thread(::run, "carplay-video").apply { isDaemon = true; start() }
 
     fun configure(codec: VideoCodec, codecData: ByteArray) {
@@ -260,6 +261,9 @@ private class VideoDecoder(
         }
         lastConfig = config
         duplicateConfigLogged = false
+        // A config has arrived, so frames are no longer waiting for one; let it be logged again if
+        // that ever happens once more in this session.
+        awaitingConfigLogged = false
         releaseDecoder()
         val surface = outputSurface ?: return
         val codec = config.codec
@@ -370,7 +374,20 @@ private class VideoDecoder(
     private fun feed(frame: VideoJob.Frame) {
         if (decoder == null) {
             if (outputSurface == null) return
-            lastConfig?.let(::configureDecoder)
+            val config = lastConfig
+            if (config == null) {
+                // Some HEVC senders start with picture frames and never send the AMC codec config
+                // first. Without a config there is nothing to configure, so every frame used to be
+                // dropped here in silence and the decoder was never created. Ask the sender for a
+                // random access frame instead, and say so once so the case shows up in the log.
+                if (!awaitingConfigLogged) {
+                    awaitingConfigLogged = true
+                    Log.i(TAG, "video frames without codec config; requesting key frame")
+                }
+                needsKeyFrame = true
+                return
+            }
+            configureDecoder(config)
         }
         val activePump = pump ?: return
         val annexB = MediaCodecSupport.toAnnexB(frame.nalus)
