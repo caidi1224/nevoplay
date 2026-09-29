@@ -294,7 +294,12 @@ class CarPlayHostActivity : ComponentActivity() {
     private var lastStageOverlayShown: Boolean? = null
     private val recentSessionMessages = ArrayDeque<String>()
     private val RECENT_SESSION_MESSAGE_LIMIT = 256
+    private val TOUCH_STATS_WINDOW_MILLIS = 5_000L
     private var logcatTap: LogcatTap? = null
+    // Correlates stutter spikes with touch/HID bursts: both are timestamped, so a window with
+    // many reports can be compared against the decoder's output-age spikes.
+    private var touchReportsSinceStats = 0
+    private var touchStatsPosted = false
     private var moreGesturesToSettings = false
     private var autoStartOnBoot = false
     private var manufacturer = AirPlayPersistence.DEFAULT_MANUFACTURER
@@ -3812,6 +3817,10 @@ class CarPlayHostActivity : ComponentActivity() {
 
         val contacts = CarPlayTouchMapper.contacts(event, view.width, view.height)
         val queued = controller?.sendTouch(contacts) ?: false
+        if (queued) {
+            touchReportsSinceStats++
+            scheduleTouchStats()
+        }
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN,
             MotionEvent.ACTION_POINTER_DOWN,
@@ -3832,6 +3841,21 @@ class CarPlayHostActivity : ComponentActivity() {
             total += if (horizontal) event.getX(index) else event.getY(index)
         }
         return total / event.pointerCount
+    }
+
+    /** Logs how many touch reports were forwarded, once per window and only when there were any. */
+    private fun scheduleTouchStats() {
+        if (touchStatsPosted) return
+        touchStatsPosted = true
+        mainHandler.postDelayed(
+            {
+                touchStatsPosted = false
+                val reports = touchReportsSinceStats
+                touchReportsSinceStats = 0
+                if (reports > 0) appendLog("touch stats reports=$reports window=${TOUCH_STATS_WINDOW_MILLIS}ms")
+            },
+            TOUCH_STATS_WINDOW_MILLIS,
+        )
     }
 
     private fun onScreenStreamStateChanged(generation: Int, type: Int, active: Boolean) {
@@ -3915,7 +3939,7 @@ class CarPlayHostActivity : ComponentActivity() {
         val activeLog = SessionLogFile(openSessionLogSink())
         sessionLogDestination = activeLog.destination
         runCatching {
-            activeLog.reset(
+            activeLog.startSession(
                 "xcertplay log started " +
                     "${SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US).format(Date())} " +
                     "pid=${Process.myPid()} build=${BuildConfig.BUILD_ID} " +

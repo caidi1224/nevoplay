@@ -12,6 +12,7 @@ import androidx.annotation.RequiresApi
 import java.io.BufferedOutputStream
 import java.io.Closeable
 import java.io.File
+import java.io.FileOutputStream
 import java.io.IOException
 import java.io.OutputStream
 import java.nio.charset.StandardCharsets
@@ -34,6 +35,17 @@ internal interface SessionLogSink {
 
     /** Opens the destination, discarding anything already written there. */
     fun openTruncating(): OutputStream
+
+    /**
+     * Opens the destination for appending.
+     *
+     * Sessions must survive an app restart: a freeze usually ends with the app being force-stopped,
+     * and truncating on every start destroyed exactly the evidence needed to explain it.
+     */
+    fun openAppending(): OutputStream
+
+    /** Bytes already present, or 0 when unknown. */
+    fun sizeBytes(): Long
 }
 
 internal class FileSessionLogSink(private val file: File) : SessionLogSink {
@@ -43,6 +55,13 @@ internal class FileSessionLogSink(private val file: File) : SessionLogSink {
         file.parentFile?.mkdirs()
         return file.outputStream()
     }
+
+    override fun openAppending(): OutputStream {
+        file.parentFile?.mkdirs()
+        return FileOutputStream(file, true)
+    }
+
+    override fun sizeBytes(): Long = if (file.isFile) file.length() else 0L
 }
 
 /** Writes to `Download/xcertplay/xcertplay.log` through the media store. */
@@ -58,6 +77,23 @@ internal class MediaStoreSessionLogSink(private val context: Context) : SessionL
         val uri = documentUri ?: resolveDocument(resolver).also { documentUri = it }
         return resolver.openOutputStream(uri, "rwt")
             ?: throw IOException("Log destination $displayPath could not be opened for writing")
+    }
+
+    override fun openAppending(): OutputStream {
+        val resolver = context.contentResolver
+        val uri = documentUri ?: resolveDocument(resolver).also { documentUri = it }
+        return resolver.openOutputStream(uri, "wa")
+            ?: throw IOException("Log destination $displayPath could not be opened for appending")
+    }
+
+    override fun sizeBytes(): Long {
+        val resolver = context.contentResolver
+        val uri = documentUri ?: resolveDocument(resolver).also { documentUri = it }
+        return runCatching {
+            resolver.query(uri, arrayOf(MediaStore.MediaColumns.SIZE), null, null, null)?.use {
+                if (it.moveToFirst()) it.getLong(0) else 0L
+            } ?: 0L
+        }.getOrDefault(0L)
     }
 
     /** Reuses the document written by an earlier session so the log stays one file. */
@@ -110,12 +146,24 @@ internal class SessionLogFile(private val sink: SessionLogSink) : Closeable {
     private var closed = false
     private val lineFormatter = SimpleDateFormat("HH:mm:ss.SSS", Locale.US)
 
-    fun reset(header: String) {
+    /**
+     * Begins a session. The file is appended to rather than replaced, so a session that ended in a
+     * force-stop is still readable afterwards; it is only restarted from scratch once the file has
+     * reached [MAX_BYTES], which the writer already enforces while running.
+     */
+    fun startSession(header: String) {
         synchronized(lock) {
             if (closed) return
             output?.close()
-            output = sink.openTruncating().buffered()
-            bytesWritten = 0L
+            val existing = runCatching { sink.sizeBytes() }.getOrDefault(0L)
+            if (existing >= MAX_BYTES) {
+                output = sink.openTruncating().buffered()
+                bytesWritten = 0L
+                writeLine("previous log discarded: reached ${MAX_BYTES / (1024 * 1024)} MiB")
+            } else {
+                output = sink.openAppending().buffered()
+                bytesWritten = existing
+            }
             writeLine(header)
         }
     }
