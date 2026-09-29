@@ -2116,6 +2116,27 @@ class CarPlayHostActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * The iPhone asks for the car UI when the driver taps the vehicle icon in CarPlay - the plist
+     * advertises support through its `enhancedRequestCarUI` extended feature, and the request
+     * arrives as a `requestUI` command. Bring the head unit's own launcher forward; the CarPlay
+     * session keeps running in the background session, exactly as when the user leaves the activity.
+     */
+    private fun showHeadUnitHome() {
+        val home = Intent(Intent.ACTION_MAIN)
+            .addCategory(Intent.CATEGORY_HOME)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        try {
+            startActivity(home)
+        } catch (error: ActivityNotFoundException) {
+            appendLog("The head unit has no home screen to return to: ${error.message}")
+            Toast.makeText(this, "No head unit home screen available", Toast.LENGTH_LONG).show()
+        } catch (error: SecurityException) {
+            appendLog("Cannot open the head unit home screen: ${error.message}")
+            Toast.makeText(this, "Cannot open the head unit home screen", Toast.LENGTH_LONG).show()
+        }
+    }
+
     private fun buildStepSliderSection(
         title: String,
         values: List<Int>,
@@ -3238,6 +3259,14 @@ class CarPlayHostActivity : ComponentActivity() {
                     setConnectionStage("Transport error; reconnecting")
                     appendLog("CarPlay transport error: $message; reconnecting from scratch")
                     reconnectAfterLoss("CarPlay transport error: $message")
+                }
+            }
+
+            override fun onHostUiRequested(session: AirPlaySession) {
+                runOnUiThread {
+                    if (controllerGeneration != restartGeneration) return@runOnUiThread
+                    appendLog("CarPlay asked for the car UI; opening the head unit home screen")
+                    showHeadUnitHome()
                 }
             }
 
