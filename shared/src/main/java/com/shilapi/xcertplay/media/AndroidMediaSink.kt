@@ -257,9 +257,10 @@ private class VideoDecoder(
                     when (val job = heldFrame ?: queue.poll(5)) {
                         is VideoJob.Config -> configureDecoder(job)
                         is VideoJob.Frame -> {
+                            // receivedUs is microseconds, matching System.nanoTime() / 1000.
                             maxAgeAtDequeueUs = maxOf(
                                 maxAgeAtDequeueUs,
-                                System.nanoTime() / 1000 - job.receivedNs,
+                                System.nanoTime() / 1000 - job.receivedUs,
                             )
                             // Preserve the initial random access picture until a Surface exists.
                             heldFrame = if (outputSurface == null) job else null

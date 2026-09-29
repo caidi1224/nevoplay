@@ -119,8 +119,9 @@ class ScreenStream(private val key: ByteArray) : Closeable {
                 arrivalBytes += bodySize
                 onMessage(header, body)
                 maxProcessUs = maxOf(maxProcessUs, (System.nanoTime() - arrivedNs) / 1_000L)
-                if (now - arrivalStatsStartNs >= ARRIVAL_STATS_WINDOW_NS) {
-                    val windowMs = (now - arrivalStatsStartNs) / 1_000_000L
+                val statsNow = System.nanoTime()
+                if (statsNow - arrivalStatsStartNs >= ARRIVAL_STATS_WINDOW_NS) {
+                    val windowMs = (statsNow - arrivalStatsStartNs) / 1_000_000L
                     log(
                         "screen stream stats frames=$arrivalFrames bytes=$arrivalBytes " +
                             "maxGapMs=${maxArrivalGapUs / 1_000} readMaxMs=${maxReadUs / 1_000} " +
@@ -131,7 +132,7 @@ class ScreenStream(private val key: ByteArray) : Closeable {
                     maxArrivalGapUs = 0L
                     maxReadUs = 0L
                     maxProcessUs = 0L
-                    arrivalStatsStartNs = now
+                    arrivalStatsStartNs = statsNow
                 }
             }
         } catch (error: Exception) {
