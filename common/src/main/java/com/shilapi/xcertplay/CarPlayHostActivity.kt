@@ -418,8 +418,9 @@ class CarPlayHostActivity : ComponentActivity() {
         airPlayIdentity = AirPlayPersistence.loadIdentity(this)
         loadPersistedSettings()
         locationPermissionAvailable = hasFineLocationPermission()
-        setContentView(buildContentView())
-        installSystemBarObserver()
+        val root = buildContentView()
+        setContentView(root)
+        installSystemBarObserver(root)
         applyFullscreenMode()
         onBackPressedDispatcher.addCallback(
             this,
@@ -643,6 +644,16 @@ class CarPlayHostActivity : ComponentActivity() {
                 FrameLayout.LayoutParams.MATCH_PARENT,
             )
             surfaceTextureListener = textureListener
+        }
+        // The single place every resize lands, whatever caused it: a vehicle status bar, a rotation,
+        // an HDMI renegotiation or a settings change. Watching the surface itself keeps the CarPlay
+        // resolution in step with the space actually available on every API level.
+        video.addOnLayoutChangeListener { _, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom ->
+            val width = right - left
+            val height = bottom - top
+            if (width != oldRight - oldLeft || height != oldBottom - oldTop) {
+                scheduleDisplaySize(width, height)
+            }
         }
         val gestureLayer = View(this).apply {
             isClickable = true
@@ -3902,17 +3913,18 @@ class CarPlayHostActivity : ComponentActivity() {
     }
 
     /**
-     * Watches the real window insets instead of inferring the bar state from configuration changes.
-     * A head unit can show or force its own status bar without a configuration change, and can push
-     * it back while the app is asking for fullscreen; observing the insets lets the app follow
-     * whatever space is actually left (and re-handshake at that size) without guessing.
+     * Watches the real window insets instead of inferring the bar state from configuration changes,
+     * and attaches to the app's own root view - never to the decor view. On Android 11 the decor's
+     * own onApplyWindowInsets is what turns the bars into content padding, so replacing that
+     * listener would silently break the layout the app needs to react to; returning the insets
+     * unchanged keeps the dispatcher's behaviour intact.
      */
-    private fun installSystemBarObserver() {
-        ViewCompat.setOnApplyWindowInsetsListener(window.decorView) { _, insets ->
+    private fun installSystemBarObserver(root: View) {
+        ViewCompat.setOnApplyWindowInsetsListener(root) { _, insets ->
             onSystemInsetsChanged(insets)
             insets
         }
-        ViewCompat.requestApplyInsets(window.decorView)
+        ViewCompat.requestApplyInsets(root)
     }
 
     private fun onSystemInsetsChanged(insets: WindowInsetsCompat) {
@@ -3920,27 +3932,35 @@ class CarPlayHostActivity : ComponentActivity() {
         val navigationBarVisible = insets.isVisible(WindowInsetsCompat.Type.navigationBars())
         val overridden = (hideTopBar && statusBarVisible) || (hideBottomBar && navigationBarVisible)
         val now = android.os.SystemClock.uptimeMillis()
+        var layoutChanged = false
         if (!overridden) {
             // The bars are as requested (or nothing has to be hidden): the vehicle is not holding them.
             if (vehicleEnforcesSystemBars) {
-                appendLog("System bars are ours again; fullscreen can be re-asserted")
+                vehicleEnforcesSystemBars = false
+                layoutChanged = true
+                appendLog("System bars are ours again; going back to fullscreen")
             }
             systemBarOverrideStrikes = 0
-            vehicleEnforcesSystemBars = false
         } else if (
             lastFullscreenRequestUptime != 0L &&
             now - lastFullscreenRequestUptime <= SYSTEM_BAR_OVERRIDE_WINDOW_MILLIS
         ) {
             // We asked for a hidden bar a moment ago and it is visible anyway: the vehicle forced it
-            // back. Stop re-requesting fullscreen - that fight is what made the window flicker.
+            // back. Stop re-requesting fullscreen - that fight is what made the window flicker - and
+            // inset the window instead, so CarPlay re-handshakes at the size the bar leaves free.
             systemBarOverrideStrikes++
             if (systemBarOverrideStrikes >= SYSTEM_BAR_OVERRIDE_STRIKES && !vehicleEnforcesSystemBars) {
-                appendLog(
-                    "The vehicle is enforcing its own system bars; staying windowed at the size " +
-                        "they leave instead of hiding them again",
-                )
                 vehicleEnforcesSystemBars = true
+                layoutChanged = true
+                appendLog(
+                    "The vehicle is enforcing its own system bars; keeping fullscreen off and " +
+                        "using the space they leave",
+                )
             }
+        }
+        if (layoutChanged) {
+            // Posted: applyFullscreenMode() changes the bars, which dispatches insets again.
+            mainHandler.post { applyFullscreenMode() }
         }
         // However the bars got here, the space they leave is the size CarPlay should run at.
         refreshDisplaySizeAfterLayout()
@@ -3973,7 +3993,11 @@ class CarPlayHostActivity : ComponentActivity() {
         window.decorView.setBackgroundColor(Color.BLACK)
         window.statusBarColor = Color.BLACK
         window.navigationBarColor = Color.BLACK
-        WindowCompat.setDecorFitsSystemWindows(window, !(hideTop && hideBottom))
+        // Only a pair of bars we really control gets the edge-to-edge layout. While the vehicle owns
+        // a bar the content has to be inset by it, which is what shrinks the video and makes the
+        // CarPlay handshake pick the smaller resolution instead of hiding content behind the bar.
+        val edgeToEdge = hideTop && hideBottom && !vehicleEnforcesSystemBars
+        WindowCompat.setDecorFitsSystemWindows(window, !edgeToEdge)
         val controller = WindowInsetsControllerCompat(window, window.decorView)
         // Black bars need light icons; the light theme is what made the forced status bar grey.
         controller.isAppearanceLightStatusBars = false
