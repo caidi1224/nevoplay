@@ -816,7 +816,7 @@ class CarPlayHostActivity : ComponentActivity() {
     private fun buildIdleHome(): View {
         val column = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(GlassUi.sdp(this, 56), GlassUi.sdp(this, 40), GlassUi.sdp(this, 56), GlassUi.sdp(this, 40))
+            setPadding(dp(56), dp(40), dp(56), dp(40))
         }
 
         val brand = LinearLayout(this).apply {
@@ -825,14 +825,16 @@ class CarPlayHostActivity : ComponentActivity() {
         }
         brand.addView(
             ImageView(this).apply {
-                setImageResource(R.mipmap.ic_launcher)
+                // The launcher icon itself, so the home screen and the app list agree without this
+                // module having to know which drawable the app declares.
+                setImageDrawable(packageManager.getApplicationIcon(applicationInfo))
                 adjustViewBounds = true
             },
-            LinearLayout.LayoutParams(GlassUi.sdp(this, 52), GlassUi.sdp(this, 52)),
+            LinearLayout.LayoutParams(dp(52), dp(52)),
         )
         brand.addView(
             GlassUi.text(this, "xcertplay", 27f, GlassUi.TEXT, bold = true).apply {
-                setPadding(GlassUi.sdp(this, 16), 0, 0, 0)
+                setPadding(dp(16), 0, 0, 0)
             },
         )
         column.addView(brand, GlassUi.block(this))
@@ -845,7 +847,7 @@ class CarPlayHostActivity : ComponentActivity() {
                 GlassUi.TEXT_TERTIARY,
                 bold = true,
                 letterSpacing = 0.18f,
-            ).apply { setPadding(0, GlassUi.sdp(this, 72), 0, 0) },
+            ).apply { setPadding(0, dp(72), 0, 0) },
             GlassUi.block(this),
         )
         column.addView(
@@ -864,10 +866,10 @@ class CarPlayHostActivity : ComponentActivity() {
 
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(GlassUi.sdp(this, 30), GlassUi.sdp(this, 28), GlassUi.sdp(this, 30), GlassUi.sdp(this, 28))
+            setPadding(dp(30), dp(28), dp(30), dp(28))
             background = GlassUi.glass(GlassUi.RADIUS_XL)
             clipToOutline = true
-            elevation = GlassUi.sdp(this, 8).toFloat()
+            elevation = dp(8).toFloat()
         }
         card.addView(
             GlassUi.text(
@@ -1648,7 +1650,7 @@ class CarPlayHostActivity : ComponentActivity() {
 
             val column = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
-                setPadding(GlassUi.sdp(this, 40), GlassUi.sdp(this, 40), GlassUi.sdp(this, 40), GlassUi.sdp(this, 160))
+                setPadding(dp(40), dp(40), dp(40), dp(160))
                 addView(GlassUi.sectionLabel(this@CarPlayHostActivity, name), GlassUi.block(this@CarPlayHostActivity))
                 addView(card, GlassUi.block(this@CarPlayHostActivity, 12))
                 addView(
@@ -1688,7 +1690,7 @@ class CarPlayHostActivity : ComponentActivity() {
         if (footer.isNotEmpty()) {
             val bar = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
-                setPadding(GlassUi.sdp(this, 40), GlassUi.sdp(this, 14), GlassUi.sdp(this, 40), GlassUi.sdp(this, 20))
+                setPadding(dp(40), dp(14), dp(40), dp(20))
                 background = GlassUi.glass(GlassUi.RADIUS_XL, strong = true)
             }
             footer.forEach { view ->
@@ -1698,7 +1700,7 @@ class CarPlayHostActivity : ComponentActivity() {
                     LinearLayout.LayoutParams(
                         LinearLayout.LayoutParams.MATCH_PARENT,
                         LinearLayout.LayoutParams.WRAP_CONTENT,
-                    ).apply { topMargin = GlassUi.sdp(this, 6) },
+                    ).apply { topMargin = dp(6) },
                 )
             }
             panel.addView(
@@ -1708,9 +1710,9 @@ class CarPlayHostActivity : ComponentActivity() {
                     FrameLayout.LayoutParams.WRAP_CONTENT,
                     Gravity.BOTTOM,
                 ).apply {
-                    leftMargin = GlassUi.sdp(this, 24)
-                    rightMargin = GlassUi.sdp(this, 24)
-                    bottomMargin = GlassUi.sdp(this, 20)
+                    leftMargin = dp(24)
+                    rightMargin = dp(24)
+                    bottomMargin = dp(20)
                 },
             )
         }
