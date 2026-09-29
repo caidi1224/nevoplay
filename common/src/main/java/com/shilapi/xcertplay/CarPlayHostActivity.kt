@@ -296,6 +296,7 @@ class CarPlayHostActivity : ComponentActivity() {
     private val RECENT_SESSION_MESSAGE_LIMIT = 256
     private val TOUCH_STATS_WINDOW_MILLIS = 5_000L
     private var logcatTap: LogcatTap? = null
+    private var buildLabelView: TextView? = null
     // Correlates stutter spikes with touch/HID bursts: both are timestamped, so a window with
     // many reports can be compared against the decoder's output-age spikes.
     private var touchReportsSinceStats = 0
@@ -786,6 +787,7 @@ class CarPlayHostActivity : ComponentActivity() {
         root.addView(stageStatus, stageParams)
         root.addView(settingsButton, settingsButtonParams)
         root.addView(buildLabel, buildLabelParams)
+        buildLabelView = buildLabel
         root.addView(
             settings,
             FrameLayout.LayoutParams(
@@ -3905,6 +3907,10 @@ class CarPlayHostActivity : ComponentActivity() {
             !menuOpen &&
             activeScreenStreamTypes.isEmpty()
         stageStatusView?.visibility = if (showStage) View.VISIBLE else View.GONE
+        // The build stamp sits under the picture, not on top of it: as soon as a screen stream is
+        // active the CarPlay image is what the driver should see.
+        buildLabelView?.visibility =
+            if (!menuOpen && activeScreenStreamTypes.isEmpty()) View.VISIBLE else View.GONE
         if (showStage != lastStageOverlayShown) {
             lastStageOverlayShown = showStage
             appendLog(
