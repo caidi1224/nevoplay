@@ -292,7 +292,6 @@ class CarPlayHostActivity : ComponentActivity() {
     private var advancedAudioChannelMapping = false
     @Volatile private var debugLogsEnabled = false
     private var lastStageOverlayShown: Boolean? = null
-    private var logcatTap: LogcatTap? = null
     private val recentSessionMessages = ArrayDeque<String>()
     private val RECENT_SESSION_MESSAGE_LIMIT = 256
     private var logcatTap: LogcatTap? = null
