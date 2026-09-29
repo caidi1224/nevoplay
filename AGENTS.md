@@ -153,6 +153,16 @@ misbehaves with the configuration cache, prove it with
 Ask for the on-device log before guessing at protocol problems:
 
 ```
+/sdcard/Download/xcertplay/xcertplay.log
+```
+
+The session log goes to the shared Downloads collection (no permission needed,
+readable by file managers and over MTP) because `Android/data/<package>/` is
+hidden from file managers on Android 11+. Settings → Diagnostics shows the path
+actually in use. On Android 9, or when the media store refuses the write, it
+falls back to:
+
+```
 /sdcard/Android/data/com.shilapi.xcertplay/files/logs/xcertplay.log
 ```
 

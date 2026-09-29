@@ -34,7 +34,9 @@
 
 It works 👍. It has been tested on car head units and phones. If you encounter
 an incompatible car head unit, please open an issue and attach your log from
-`/sdcard/Android/data/com.shilapi.xcertplay/files/logs/xcertplay.log`.
+`/sdcard/Download/xcertplay/xcertplay.log` (Settings shows the exact path; on
+Android 9 it falls back to
+`/sdcard/Android/data/com.shilapi.xcertplay/files/logs/xcertplay.log`).
 
 Adapter board: [CH341-to-MFI](https://github.com/shilapi/ch341-to-mfi-chip)
 

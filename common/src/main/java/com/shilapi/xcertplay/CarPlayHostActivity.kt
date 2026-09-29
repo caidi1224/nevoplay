@@ -322,6 +322,7 @@ class CarPlayHostActivity : ComponentActivity() {
     private var restartGeneration = 0
     private var reconnectScheduled = false
     private var sessionLog: SessionLogFile? = null
+    private var sessionLogDestination = ""
     private var gestureSequenceActive = false
     private var gestureTracking = false
     private var gestureStartX = 0f
@@ -1236,6 +1237,13 @@ class CarPlayHostActivity : ComponentActivity() {
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT,
             ).apply { topMargin = dp(12) },
+        )
+        content.addView(
+            menuText("Log file: $sessionLogDestination", 14f, MENU_SECONDARY),
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            ).apply { topMargin = dp(10) },
         )
         content.addView(
             Button(this).apply {
@@ -3772,17 +3780,32 @@ class CarPlayHostActivity : ComponentActivity() {
         "${SimpleDateFormat("HH:mm:ss.SSS", Locale.US).format(Date(nowMillis))}  $message"
 
     private fun initializeSessionLog() {
-        val baseDirectory = getExternalFilesDir(null) ?: filesDir
-        val logFile = File(File(baseDirectory, "logs"), "xcertplay.log")
-        val activeLog = SessionLogFile(logFile)
+        val activeLog = SessionLogFile(openSessionLogSink())
+        sessionLogDestination = activeLog.destination
         runCatching {
             activeLog.reset(
                 "xcertplay log started " +
                     "${SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US).format(Date())} " +
-                    "pid=${Process.myPid()} path=${logFile.absolutePath}",
+                    "pid=${Process.myPid()} path=${activeLog.destination}",
             )
         }
         sessionLog = activeLog
+    }
+
+    /**
+     * Prefers the shared Downloads collection: from Android 11 on, the app-private
+     * `Android/data/<package>` tree is hidden from file managers and MTP, which makes the
+     * log impossible to collect on a head unit. Falls back to app storage when the media
+     * store is missing (Android 9) or refuses the write.
+     */
+    private fun openSessionLogSink(): SessionLogSink {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val shared = MediaStoreSessionLogSink(this)
+            if (runCatching { shared.openTruncating().close() }.isSuccess) return shared
+            Log.w(TAG, "Shared log destination is unavailable; using app storage instead")
+        }
+        val baseDirectory = getExternalFilesDir(null) ?: filesDir
+        return FileSessionLogSink(File(File(baseDirectory, "logs"), "xcertplay.log"))
     }
 
     private fun refreshLogView(nowMillis: Long) {
