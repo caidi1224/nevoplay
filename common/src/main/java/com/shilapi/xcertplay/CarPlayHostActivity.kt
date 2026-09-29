@@ -23,6 +23,7 @@ import android.text.InputType
 import android.text.TextUtils
 import android.text.TextWatcher
 import android.util.Log
+import android.util.TypedValue
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.Surface
@@ -1292,6 +1293,7 @@ class CarPlayHostActivity : ComponentActivity() {
             setTextColor(MENU_BUTTON_TEXT)
             backgroundTintList = ColorStateList.valueOf(MENU_ACCENT)
             minHeight = dp(52)
+            tag = MENU_FOOTER_TAG
             setOnClickListener { saveSettingsAndReconnect() }
         }
         content.addView(
@@ -1309,6 +1311,7 @@ class CarPlayHostActivity : ComponentActivity() {
             setTextColor(Color.WHITE)
             backgroundTintList = ColorStateList.valueOf(MENU_DANGER)
             minHeight = dp(52)
+            tag = MENU_FOOTER_TAG
             setOnClickListener { exitApplication() }
         }
         content.addView(
@@ -1357,13 +1360,13 @@ class CarPlayHostActivity : ComponentActivity() {
         overlay.addView(
             panel,
             FrameLayout.LayoutParams(
-                minOf(resources.displayMetrics.widthPixels, MAX_SETTINGS_MENU_WIDTH_PX),
+                settingsPanelWidth(resources.displayMetrics.widthPixels),
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 Gravity.CENTER,
             ),
         )
         overlay.addOnLayoutChangeListener { view, _, _, _, _, _, _, _, _ ->
-            val desiredWidth = minOf(view.width, MAX_SETTINGS_MENU_WIDTH_PX)
+            val desiredWidth = settingsPanelWidth(view.width)
             val params = panel.layoutParams
             if (params.width != desiredWidth) {
                 params.width = desiredWidth
@@ -1371,12 +1374,135 @@ class CarPlayHostActivity : ComponentActivity() {
             }
         }
 
+        if (settingsMenuIsLandscape()) {
+            splitSettingsMenuIntoColumns(content)
+        }
+        scaleMenuTextSize(overlay, menuTextScale())
+
         resolutionValueView = resolutionValue
         resolutionPreviewView = preview
         this.hotspotStatusView = hotspotStatusView
         updateHotspotStatusBlock()
         updateResolutionMenu()
         return overlay
+    }
+
+    /**
+     * The settings panel is only usable as a full-height single column on narrow screens. Wide
+     * landscape head units get a much wider panel with two columns of categories, so the rows stay
+     * reachable without scrolling through a narrow strip.
+     */
+    private fun settingsMenuIsLandscape(): Boolean {
+        val metrics = resources.displayMetrics
+        return metrics.widthPixels >= LANDSCAPE_SETTINGS_MIN_WIDTH_PX &&
+            metrics.widthPixels > metrics.heightPixels
+    }
+
+    private fun settingsPanelWidth(availableWidth: Int): Int =
+        if (settingsMenuIsLandscape()) {
+            minOf((availableWidth * LANDSCAPE_SETTINGS_WIDTH_FRACTION).toInt(), MAX_SETTINGS_MENU_WIDTH_LANDSCAPE_PX)
+        } else {
+            minOf(availableWidth, MAX_SETTINGS_MENU_WIDTH_PX)
+        }
+
+    /** Text sizes are authored for a 1080p-wide panel; scale them up on larger panels. */
+    private fun menuTextScale(): Float =
+        (resources.displayMetrics.widthPixels / MENU_TEXT_SCALE_REFERENCE_WIDTH_PX)
+            .coerceIn(1f, MENU_TEXT_SCALE_MAX)
+
+    private fun scaleMenuTextSize(root: View, scale: Float) {
+        if (scale <= 1.001f) return
+        if (root is TextView) {
+            root.setTextSize(TypedValue.COMPLEX_UNIT_PX, root.textSize * scale)
+        }
+        if (root is ViewGroup) {
+            for (index in 0 until root.childCount) {
+                scaleMenuTextSize(root.getChildAt(index), scale)
+            }
+        }
+    }
+
+    /**
+     * Re-flow the rows that [buildSettingsMenu] appended as one column into two balanced columns,
+     * keeping every category header with the rows that follow it. The title stays on top and the
+     * tagged footer buttons stay at the bottom, spanning both columns.
+     */
+    private fun splitSettingsMenuIntoColumns(content: LinearLayout) {
+        if (content.childCount < 4) return
+
+        val title = content.getChildAt(0)
+        val footer = mutableListOf<View>()
+        val sections = mutableListOf<View>()
+        for (index in 1 until content.childCount) {
+            val child = content.getChildAt(index)
+            if (child.tag == MENU_FOOTER_TAG) footer.add(child) else sections.add(child)
+        }
+
+        val groups = mutableListOf<MutableList<View>>()
+        for (view in sections) {
+            if (groups.isEmpty() || view.tag == MENU_CATEGORY_TAG) groups.add(mutableListOf())
+            groups.last().add(view)
+        }
+        if (groups.size < 2) return
+
+        // Split between categories so each column keeps document order, choosing the boundary whose
+        // estimated heights are closest to equal (one column would otherwise take both big groups).
+        val weights = groups.map { group -> group.sumOf { menuGroupWeight(it) } }
+        val total = weights.sum()
+        var splitIndex = 1
+        var bestDifference = Int.MAX_VALUE
+        var prefixWeight = 0
+        for (index in 0 until groups.size - 1) {
+            prefixWeight += weights[index]
+            val difference = Math.abs(total - 2 * prefixWeight)
+            if (difference < bestDifference) {
+                bestDifference = difference
+                splitIndex = index + 1
+            }
+        }
+
+        content.removeAllViews()
+
+        val columns = listOf(
+            LinearLayout(this).apply { orientation = LinearLayout.VERTICAL },
+            LinearLayout(this).apply { orientation = LinearLayout.VERTICAL },
+        )
+        for ((index, group) in groups.withIndex()) {
+            val column = if (index < splitIndex) columns[0] else columns[1]
+            group.forEach { column.addView(it) }
+        }
+
+        content.addView(title)
+        content.addView(
+            LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                addView(
+                    columns[0],
+                    LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
+                )
+                addView(
+                    columns[1],
+                    LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                        .apply { marginStart = dp(SETTINGS_COLUMN_GAP_DP) },
+                )
+            },
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            ),
+        )
+        footer.forEach { content.addView(it) }
+    }
+
+    /** Rough height estimate for column balancing: every nested row counts as one unit. */
+    private fun menuGroupWeight(view: View): Int {
+        var weight = 1
+        if (view is ViewGroup) {
+            for (index in 0 until view.childCount) {
+                weight += menuGroupWeight(view.getChildAt(index))
+            }
+        }
+        return weight
     }
 
     private fun persistMenuSettings() {
@@ -1665,7 +1791,7 @@ class CarPlayHostActivity : ComponentActivity() {
     }
 
     private fun settingsCategoryHeader(title: String): TextView =
-        menuText(title, 16f, MENU_ACCENT, bold = true)
+        menuText(title, 16f, MENU_ACCENT, bold = true).apply { tag = MENU_CATEGORY_TAG }
 
     private fun buildLocationReportingSection(): View =
         LinearLayout(this).apply {
@@ -3760,6 +3886,14 @@ class CarPlayHostActivity : ComponentActivity() {
         const val THREE_FINGER_SWIPE_DISTANCE_DP = 72
         const val THREE_FINGER_SWIPE_DIRECTION_RATIO = 1.15f
         const val MAX_SETTINGS_MENU_WIDTH_PX = 1200
+        const val MAX_SETTINGS_MENU_WIDTH_LANDSCAPE_PX = 2600
+        const val LANDSCAPE_SETTINGS_MIN_WIDTH_PX = 1600
+        const val LANDSCAPE_SETTINGS_WIDTH_FRACTION = 0.96f
+        const val MENU_TEXT_SCALE_REFERENCE_WIDTH_PX = 1920f
+        const val MENU_TEXT_SCALE_MAX = 1.5f
+        const val SETTINGS_COLUMN_GAP_DP = 48
+        const val MENU_CATEGORY_TAG = "settings-category"
+        const val MENU_FOOTER_TAG = "settings-footer"
         val MENU_BACKGROUND = Color.rgb(12, 16, 19)
         val MENU_SECONDARY = Color.rgb(170, 180, 190)
         val MENU_ACCENT = Color.rgb(127, 205, 154)
