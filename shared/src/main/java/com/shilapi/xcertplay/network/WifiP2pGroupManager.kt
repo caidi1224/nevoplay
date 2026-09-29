@@ -111,10 +111,20 @@ class WifiP2pGroupManager(
             }
 
             ensureStartActive(attempt)
-            p2pManager.createGroup(p2pChannel, config, createActionListener(attempt))
-            awaitGroupCreated(attempt, deadlineNanos, timeoutMillis)
+            // A group left behind by a previous run - the app being killed without a chance to call
+            // close() is enough - makes createGroup answer BUSY for about 45 seconds. Take that group
+            // over when it is ours and already usable, clear it otherwise, and only then ask for one.
+            val adopted = adoptPreviousGroup(
+                attempt = attempt,
+                channel = p2pChannel,
+                credentials = credentials,
+                deadlineNanos = deadlineNanos,
+            )
+            if (adopted == null) {
+                createGroupWithBusyRetry(attempt, p2pChannel, config, deadlineNanos, timeoutMillis)
+            }
 
-            val group = awaitUsableGroup(
+            val group = adopted ?: awaitUsableGroup(
                 attempt = attempt,
                 channel = p2pChannel,
                 credentials = credentials,
@@ -190,14 +200,16 @@ class WifiP2pGroupManager(
             failAttempt(
                 attempt,
                 IOException("Wi-Fi P2P createGroup failed: ${failureReason(reason)}"),
+                reason,
             )
         }
     }
 
-    private fun failAttempt(attempt: StartAttempt, failure: IOException) {
+    private fun failAttempt(attempt: StartAttempt, failure: IOException, reason: Int? = null) {
         synchronized(stateLock) {
             if (startAttempt === attempt && !attempt.stopped && !closed) {
                 if (attempt.failure == null) attempt.failure = failure
+                if (reason != null) attempt.createFailureReason = reason
                 stateLock.notifyAll()
             }
         }
@@ -223,6 +235,74 @@ class WifiP2pGroupManager(
                 waitNanos(remainingNanos)
             }
         }
+    }
+
+    /**
+     * Returns a group left behind by a previous run when it is ours and already usable, and clears
+     * whatever else is holding the P2P radio so that creating a group can succeed.
+     */
+    @RequiresApi(Build.VERSION_CODES.Q)
+    private fun adoptPreviousGroup(
+        attempt: StartAttempt,
+        channel: WifiP2pManager.Channel,
+        credentials: WifiP2pCredentials,
+        deadlineNanos: Long,
+    ): WirelessHotspotInfo? {
+        val previous = requestGroupInfo(
+            attempt = attempt,
+            channel = channel,
+            timeoutNanos = minOf(remainingNanos(deadlineNanos), REQUEST_POLL_NANOS),
+        ) ?: return null
+        val name = previous.networkName?.takeIf { it.isNotBlank() }
+        if (name == credentials.ssid) {
+            val probeDeadline = minOf(deadlineNanos, System.nanoTime() + GROUP_ADOPT_PROBE_NANOS)
+            try {
+                return awaitUsableGroup(
+                    attempt = attempt,
+                    channel = channel,
+                    credentials = credentials,
+                    deadlineNanos = probeDeadline,
+                    timeoutMillis = GROUP_ADOPT_PROBE_MILLIS,
+                )
+            } catch (failure: IOException) {
+                Log.w(TAG, "leftover Wi-Fi P2P group '$name' is unusable: ${failure.message}")
+            }
+        } else {
+            Log.w(TAG, "clearing the Wi-Fi P2P group '$name' held by another session")
+        }
+        removeGroupBlocking(channel)
+        return null
+    }
+
+    /**
+     * Creates the group, retrying once after clearing it when the framework answers BUSY - the
+     * symptom of a group it is still holding on to.
+     */
+    private fun createGroupWithBusyRetry(
+        attempt: StartAttempt,
+        channel: WifiP2pManager.Channel,
+        config: WifiP2pConfig,
+        deadlineNanos: Long,
+        timeoutMillis: Long,
+    ) {
+        p2pManager.createGroup(channel, config, createActionListener(attempt))
+        try {
+            awaitGroupCreated(attempt, deadlineNanos, timeoutMillis)
+            return
+        } catch (failure: IOException) {
+            if (synchronized(stateLock) { attempt.createFailureReason } != WifiP2pManager.BUSY) {
+                throw failure
+            }
+            Log.w(TAG, "Wi-Fi P2P createGroup was busy; clearing the stale group and retrying once")
+            removeGroupBlocking(channel)
+            synchronized(stateLock) {
+                ensureStartActiveLocked(attempt)
+                attempt.failure = null
+                attempt.createFailureReason = null
+            }
+        }
+        p2pManager.createGroup(channel, config, createActionListener(attempt))
+        awaitGroupCreated(attempt, deadlineNanos, timeoutMillis)
     }
 
     @RequiresApi(Build.VERSION_CODES.Q)
@@ -501,6 +581,7 @@ class WifiP2pGroupManager(
         var channel: WifiP2pManager.Channel? = null
         var thread: HandlerThread? = null
         var createSucceeded = false
+        var createFailureReason: Int? = null
         var failure: IOException? = null
         var stopped = false
     }
@@ -509,7 +590,9 @@ class WifiP2pGroupManager(
         const val TAG = "xcertplay-usb"
         const val NANOS_PER_MILLISECOND = 1_000_000L
         const val REMOVE_GROUP_TIMEOUT_MILLIS = 2_000L
+        const val GROUP_ADOPT_PROBE_MILLIS = 500L
         val REQUEST_POLL_NANOS: Long = TimeUnit.MILLISECONDS.toNanos(500)
+        val GROUP_ADOPT_PROBE_NANOS: Long = TimeUnit.MILLISECONDS.toNanos(GROUP_ADOPT_PROBE_MILLIS)
     }
 }
 
