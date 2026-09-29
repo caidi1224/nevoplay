@@ -964,7 +964,7 @@ class CarPlayController(
             ).run(
                 identification = identification,
                 endpoint = endpoint,
-                timeoutMillis = controlLoopTimeoutMillis(),
+                bringUpTimeoutMillis = CONTROL_BRING_UP_TIMEOUT_MILLIS,
                 locationProvider = locationProvider,
                 onReady = { activateMediaRemote(channel) },
                 onStopped = { deactivateMediaRemote(channel) },
@@ -1004,10 +1004,6 @@ class CarPlayController(
                         )
                     }
                 }
-                Iap2WirelessControlTerminal.TIMED_OUT ->
-                    if (!wirelessActiveReported.get()) {
-                        onStatus(CarPlayStatus.ControlEnded)
-                    }
             }
         } catch (error: Throwable) {
             if (closed || generation != wirelessGeneration.get()) {
@@ -1052,7 +1048,7 @@ class CarPlayController(
                     ).run(
                         identification = identification,
                         endpoint = endpoint,
-                        timeoutMillis = Iap2WirelessControlClient.NO_TIMEOUT_MILLIS,
+                        bringUpTimeoutMillis = Iap2WirelessControlClient.NO_TIMEOUT_MILLIS,
                         locationProvider = locationProvider,
                         onReady = {
                             activateMediaRemote(channel)
@@ -1064,8 +1060,6 @@ class CarPlayController(
                     )
                     if (closed || generation != wirelessGeneration.get()) return@execute
                     when (result.terminal) {
-                        Iap2WirelessControlTerminal.TIMED_OUT ->
-                            onStatus(CarPlayStatus.ControlEnded)
                         Iap2WirelessControlTerminal.CHANNEL_CLOSED ->
                             onStatus(CarPlayStatus.Failed("Wireless iAP2 tunnel closed"))
                     }
@@ -1432,7 +1426,7 @@ class CarPlayController(
                 identification = config.identification,
                 endpoint = endpoint,
                 availableCurrentMilliAmps = config.availableCurrentMilliAmps,
-                timeoutMillis = controlLoopTimeoutMillis(),
+                bringUpTimeoutMillis = CONTROL_BRING_UP_TIMEOUT_MILLIS,
                 locationProvider = locationProvider,
                 onReady = { activateMediaRemote(csm) },
                 onStopped = { deactivateMediaRemote(csm) },
@@ -1441,7 +1435,6 @@ class CarPlayController(
             )
             onStatus(
                 when (result.terminal) {
-                    Iap2WiredControlTerminal.TIMED_OUT -> CarPlayStatus.ControlEnded
                     Iap2WiredControlTerminal.CHANNEL_CLOSED ->
                         CarPlayStatus.Failed("CarPlay control channel closed")
                 },
@@ -1754,9 +1747,6 @@ class CarPlayController(
         }
     }
 
-    private fun controlLoopTimeoutMillis(): Long =
-        if (config.locationReportingEnabled) LOCATION_CONTROL_LOOP_TIMEOUT_MILLIS else CONTROL_LOOP_TIMEOUT_MILLIS
-
     private fun attachVpn(ncm: NcmUsbBridge, hostMac: ByteArray): Boolean {
         onStatus(CarPlayStatus.AttachingNetwork)
         val service = awaitVpnService() ?: run {
@@ -1961,8 +1951,7 @@ class CarPlayController(
         private const val WIFI_P2P_START_TIMEOUT_MILLIS = 20_000L
         private const val PAIR_TIMEOUT_MILLIS = 5 * 60_000L
         private const val VPN_CONNECT_TIMEOUT_MILLIS = 10_000L
-        private const val CONTROL_LOOP_TIMEOUT_MILLIS = 5 * 60_000L
-        private const val LOCATION_CONTROL_LOOP_TIMEOUT_MILLIS = 24 * 60 * 60 * 1_000L
+        private const val CONTROL_BRING_UP_TIMEOUT_MILLIS = 5 * 60_000L
         private const val PERMISSION_POLL_INTERVAL_MILLIS = 500L
         private const val PERMISSION_POLL_TIMEOUT_MILLIS = 120_000L
         private const val DEVICE_AVAILABILITY_POLL_INTERVAL_MILLIS = 2_000L
