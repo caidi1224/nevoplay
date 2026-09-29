@@ -816,11 +816,11 @@ class CarPlayHostActivity : ComponentActivity() {
 
     private fun buildSettingsMenu(): View {
         val overlay = FrameLayout(this).apply {
-            setBackgroundColor(Color.BLACK)
+            setBackgroundColor(Color.argb(214, 3, 5, 10))
             isClickable = true
         }
         val panel = FrameLayout(this).apply {
-            setBackgroundColor(MENU_BACKGROUND)
+            background = GlassUi.backdrop(this@CarPlayHostActivity)
         }
         val content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -1862,7 +1862,11 @@ class CarPlayHostActivity : ComponentActivity() {
     }
 
     private fun settingsCategoryHeader(title: String): TextView =
-        menuText(title, 16f, MENU_ACCENT, bold = true).apply { tag = MENU_CATEGORY_TAG }
+        GlassUi.sectionLabel(this, title).apply {
+                tag = MENU_CATEGORY_TAG
+                setPadding(GlassUi.dp(this@CarPlayHostActivity, 10), GlassUi.dp(this@CarPlayHostActivity, 26),
+                    GlassUi.dp(this@CarPlayHostActivity, 10), GlassUi.dp(this@CarPlayHostActivity, 12))
+            }
 
     private fun buildLocationReportingSection(): View =
         LinearLayout(this).apply {
@@ -4221,11 +4225,13 @@ class CarPlayHostActivity : ComponentActivity() {
         const val SETTINGS_COLUMN_GAP_DP = 48
         const val MENU_CATEGORY_TAG = "settings-category"
         const val MENU_FOOTER_TAG = "settings-footer"
-        val MENU_BACKGROUND = Color.rgb(12, 16, 19)
-        val MENU_SECONDARY = Color.rgb(170, 180, 190)
-        val MENU_ACCENT = Color.rgb(127, 205, 154)
-        val MENU_ACCENT_TRACK = Color.rgb(78, 143, 102)
-        val MENU_TRACK_OFF = Color.rgb(64, 74, 80)
+        // Palette now comes from GlassUi so the whole UI moves together; the names stay so the
+        // hundreds of existing call sites keep working.
+        val MENU_BACKGROUND = GlassUi.BG
+        val MENU_SECONDARY = GlassUi.TEXT_SECONDARY
+        val MENU_ACCENT = GlassUi.ACCENT
+        val MENU_ACCENT_TRACK = GlassUi.ACCENT_DIM
+        val MENU_TRACK_OFF = GlassUi.SWITCH_TRACK_OFF
         val MENU_BUTTON_TEXT = Color.rgb(8, 17, 11)
         val MENU_DANGER = Color.rgb(190, 45, 45)
         val NO_VIDEO_BACKGROUND = Color.rgb(0x16, 0x16, 0x18)
