@@ -267,10 +267,19 @@ class WifiP2pGroupManager(
             } catch (failure: IOException) {
                 Log.w(TAG, "leftover Wi-Fi P2P group '$name' is unusable: ${failure.message}")
             }
+        } else if (name != null && name.startsWith(WIFI_P2P_SSID_PREFIX)) {
+            Log.w(TAG, "clearing the stale Wi-Fi P2P group '$name' left by an earlier session")
         } else {
-            Log.w(TAG, "clearing the Wi-Fi P2P group '$name' held by another session")
+            // A group this app did not create. Removing it would fight whichever app does own it, and
+            // the radio is the scarce resource here, so report it instead of taking it away.
+            throw IOException(
+                "Wi-Fi Direct is held by another group (${name ?: "unnamed"}); " +
+                    "close other projection apps and try again",
+            )
         }
-        removeGroupBlocking(channel)
+        if (!removeGroupAndConfirm(attempt, channel, deadlineNanos)) {
+            Log.w(TAG, "Wi-Fi P2P group '$name' was still present after removal")
+        }
         return null
     }
 
@@ -519,6 +528,35 @@ class WifiP2pGroupManager(
         removeGroup(channel, waitForCallback = true)
     }
 
+    /**
+     * Removes the group and then waits until the framework agrees it is gone.
+     *
+     * `removeGroup` only reports that the request was accepted; creating a new group before the old
+     * one has actually been released is what the framework answers with BUSY. A device log showed 110
+     * such failures over 124 seconds of blind retries, so this waits instead.
+     */
+    private fun removeGroupAndConfirm(
+        attempt: StartAttempt,
+        channel: WifiP2pManager.Channel,
+        deadlineNanos: Long,
+    ): Boolean {
+        removeGroupBlocking(channel)
+        val confirmDeadline = minOf(deadlineNanos, System.nanoTime() + REMOVE_GROUP_CONFIRM_NANOS)
+        while (System.nanoTime() < confirmDeadline) {
+            val remaining = requestGroupInfo(
+                attempt = attempt,
+                channel = channel,
+                timeoutNanos = minOf(confirmDeadline - System.nanoTime(), REQUEST_POLL_NANOS),
+            )
+            if (remaining == null) {
+                Log.i(TAG, "Wi-Fi P2P group removal confirmed")
+                return true
+            }
+            Thread.sleep(REMOVE_GROUP_CONFIRM_POLL_MILLIS)
+        }
+        return false
+    }
+
     private fun removeGroup(channel: WifiP2pManager.Channel, waitForCallback: Boolean) {
         val latch = CountDownLatch(1)
         try {
@@ -590,6 +628,9 @@ class WifiP2pGroupManager(
         const val TAG = "xcertplay-usb"
         const val NANOS_PER_MILLISECOND = 1_000_000L
         const val REMOVE_GROUP_TIMEOUT_MILLIS = 2_000L
+        /** How long to keep polling for confirmation that the old group has been released. */
+        val REMOVE_GROUP_CONFIRM_NANOS: Long = TimeUnit.MILLISECONDS.toNanos(2_000)
+        const val REMOVE_GROUP_CONFIRM_POLL_MILLIS = 100L
         const val GROUP_ADOPT_PROBE_MILLIS = 500L
         val REQUEST_POLL_NANOS: Long = TimeUnit.MILLISECONDS.toNanos(500)
         val GROUP_ADOPT_PROBE_NANOS: Long = TimeUnit.MILLISECONDS.toNanos(GROUP_ADOPT_PROBE_MILLIS)
