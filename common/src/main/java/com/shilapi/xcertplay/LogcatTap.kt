@@ -31,7 +31,9 @@ class LogcatTap(private val append: (String) -> Unit) : Closeable {
 
     private fun run() {
         try {
-            val pid = Process.myPid()
+            // Fully qualified: the field below is java.lang.Process (the child), so importing
+            // android.os.Process here would shadow it.
+            val pid = android.os.Process.myPid()
             val child = ProcessBuilder("logcat", "-v", "threadtime", "--pid=$pid")
                 .redirectErrorStream(true)
                 .start()
