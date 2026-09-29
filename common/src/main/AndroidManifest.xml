@@ -5,6 +5,17 @@
 
     <application>
 
+        <!-- Changan Qiyuan OpenSDK credentials; the SDK reads them from here and nowhere else. The
+             placeholders are filled at build time from the environment (a repository secret in CI)
+             so no credential is ever committed. An empty value simply means the SDK cannot
+             initialise and the vehicle-signal probe stays off. -->
+        <meta-data
+            android:name="ca_dev_client_id"
+            android:value="${caDevClientId}" />
+        <meta-data
+            android:name="ca_dev_client_secret"
+            android:value="${caDevClientSecret}" />
+
         <activity
             android:name="com.shilapi.xcertplay.CarPlayHostActivity"
             android:configChanges="density|keyboardHidden|orientation|screenLayout|screenSize|smallestScreenSize|uiMode"

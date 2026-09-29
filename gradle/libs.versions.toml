@@ -13,6 +13,7 @@ junit = "4.13.2"
 bouncycastle = "1.79"
 concentus = "1.0.0"
 media3 = "1.11.1"
+gson = "2.11.0"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -33,6 +34,7 @@ bouncycastle = { group = "org.bouncycastle", name = "bcprov-jdk18on", version.re
 concentus = { group = "com.plasmoverse", name = "concentus", version.ref = "concentus" }
 androidx-media3-container = { group = "androidx.media3", name = "media3-container", version.ref = "media3" }
 androidx-media3-session = { group = "androidx.media3", name = "media3-session", version.ref = "media3" }
+gson = { group = "com.google.code.gson", name = "gson", version.ref = "gson" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
