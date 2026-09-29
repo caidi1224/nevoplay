@@ -20,6 +20,7 @@ import java.net.NetworkInterface
 import java.net.SocketException
 import java.net.UnknownHostException
 import java.util.Collections
+import java.util.Enumeration
 import java.util.concurrent.TimeUnit
 
 /**
@@ -200,33 +201,120 @@ class ManualHotspotManager(
         } ?: return null
         val primaryInterface = connectivityManager?.activeNetwork
             ?.let { connectivityManager.getLinkProperties(it)?.interfaceName }
+        // The interface carrying the hotspot is often the active network as well, and on a manual
+        // hotspot that is precisely the one the phone has to reach. Excluding it left the app
+        // advertising an unrelated interface - the device log shows eth0 with a stale 192.168.1.3
+        // being announced while the working wlan1/192.168.213.71 was filtered out.
+        //
+        // The hotspot interface is identified through the address the Wi-Fi stack is using, never
+        // through the default route: that route can be Ethernet while the hotspot link is Wi-Fi.
+        val activeWifiInterface = wifiInterfaceForExpectedNetwork(interfaces)
         return Collections.list(interfaces)
             .asSequence()
-            .filter { isUsableInterface(it, primaryInterface) }
+            .filter {
+                isUsableInterface(
+                    networkInterface = it,
+                    primaryInterface = primaryInterface,
+                    activeWifiInterface = activeWifiInterface,
+                )
+            }
             .mapNotNull { networkInterface ->
                 networkInterface.hotspotAddress()?.let { address ->
                     LocalHotspotInterface(
                         name = networkInterface.name,
                         hostAddress = address,
                         hardwareAddress = networkInterface.hardwareAddress?.toMacAddressString(),
-                        score = interfaceScore(networkInterface.name, address),
+                        score = interfaceScore(networkInterface.name, address) +
+                            if (networkInterface.name == activeWifiInterface) {
+                                ACTIVE_WIFI_INTERFACE_BONUS
+                            } else {
+                                0
+                            },
                     )
                 }
             }
             .maxByOrNull(LocalHotspotInterface::score)
+            ?.also { selected ->
+                Log.i(
+                    TAG,
+                    "manual hotspot interface=${selected.name} " +
+                        "address=${selected.hostAddress.hostAddress} score=${selected.score} " +
+                        "carriesTheExpectedNetwork=${selected.name == activeWifiInterface}",
+                )
+            }
+    }
+
+    /** The SSID of the network the device is on, when Android lets an app read it. */
+    private fun connectedSsid(): String? = try {
+        unquote(wifiManager.connectionInfo?.ssid)?.takeIf { it.isNotBlank() }
+    } catch (_: SecurityException) {
+        null
+    }
+
+    /**
+     * The interface that carries the Wi-Fi network this device is connected to, or null when Android
+     * does not expose it. The address comes from the Wi-Fi stack itself, which keeps the answer tied
+     * to the hotspot link even when an Ethernet link owns the default route.
+     */
+    private fun wifiInterfaceForExpectedNetwork(
+        interfaces: Enumeration<NetworkInterface>,
+    ): String? {
+        val connectedSsid = connectedSsid()
+        if (connectedSsid != null && connectedSsid != expectedSsid) return null
+        val address = wifiConnectionAddress() ?: return null
+        return Collections.list(interfaces).firstOrNull { candidate ->
+            try {
+                Collections.list(candidate.inetAddresses).any { it == address }
+            } catch (_: SocketException) {
+                false
+            }
+        }?.name
+    }
+
+    @Suppress("DEPRECATION")
+    private fun wifiConnectionAddress(): InetAddress? {
+        val raw = try {
+            wifiManager.connectionInfo?.ipAddress
+        } catch (_: SecurityException) {
+            null
+        } ?: return null
+        if (raw == 0) return null
+        val bytes = byteArrayOf(
+            (raw and 0xff).toByte(),
+            (raw shr 8 and 0xff).toByte(),
+            (raw shr 16 and 0xff).toByte(),
+            (raw shr 24 and 0xff).toByte(),
+        )
+        return try {
+            InetAddress.getByAddress(bytes)
+        } catch (failure: UnknownHostException) {
+            Log.w(TAG, "could not read the Wi-Fi connection address", failure)
+            null
+        }
     }
 
     private fun isUsableInterface(
         networkInterface: NetworkInterface,
         primaryInterface: String?,
+        activeWifiInterface: String?,
     ): Boolean = try {
-        networkInterface.name != primaryInterface &&
+        // A Wi-Fi interface is always a hotspot candidate, even when it also carries the active
+        // network: on a manual hotspot that is exactly the interface the phone has to reach. A
+        // non-Wi-Fi active interface stays excluded, so an Ethernet link out to the internet is
+        // never advertised to the phone.
+        val carriesTheHotspot = networkInterface.name == activeWifiInterface ||
+            isWifiInterface(networkInterface.name)
+        (networkInterface.name != primaryInterface || carriesTheHotspot) &&
             !networkInterface.isLoopback &&
             networkInterface.isUp &&
             EXCLUDED_INTERFACE_PREFIXES.none { networkInterface.name.startsWith(it) }
     } catch (_: SocketException) {
         false
     }
+
+    private fun isWifiInterface(name: String): Boolean =
+        name.startsWith("wlan") || name.startsWith("ap") || name.startsWith("p2p") ||
+            name.contains("softap", ignoreCase = true)
 
     private fun interfaceScore(name: String, address: InetAddress): Int {
         var score = when {
@@ -242,33 +330,24 @@ class ManualHotspotManager(
                 address.isSiteLocalAddress -> score += 20
             }
         }
-        if (address is Inet6Address && address.isLinkLocalAddress) score += 15
+        // A link-local IPv6 address is not usable by the phone, so it never earns a bonus.
         return score
     }
 
     private fun NetworkInterface.hotspotAddress(): InetAddress? {
-        var ipv6: Inet6Address? = null
+        var routableIpv6: Inet6Address? = null
         for (address in Collections.list(inetAddresses)) {
             if (address is Inet4Address && !address.isLoopbackAddress &&
                 !address.isLinkLocalAddress
             ) {
                 return address
             }
-            if (address is Inet6Address && address.isLinkLocalAddress) {
-                if (ipv6 == null) {
-                    ipv6 = if (address.scopeId == index) {
-                        address
-                    } else {
-                        try {
-                            Inet6Address.getByAddress(null, address.address, this)
-                        } catch (_: UnknownHostException) {
-                            null
-                        }
-                    }
-                }
+            // A link-local IPv6 address cannot be reached by the phone, so it is never announced.
+            if (address is Inet6Address && !address.isLinkLocalAddress && routableIpv6 == null) {
+                routableIpv6 = address
             }
         }
-        return ipv6
+        return routableIpv6
     }
 
     private fun frequencyFromConnectionInfo(): Int? {
@@ -447,6 +526,9 @@ class ManualHotspotManager(
     private companion object {
         const val TAG = "xcertplay-usb"
         const val NANOS_PER_MILLISECOND = 1_000_000L
+
+        /** The interface that actually carries the expected network wins outright. */
+        const val ACTIVE_WIFI_INTERFACE_BONUS = 200
         val INTERFACE_POLL_NANOS: Long = TimeUnit.MILLISECONDS.toNanos(250)
         val EXCLUDED_INTERFACE_PREFIXES = listOf(
             "lo",
