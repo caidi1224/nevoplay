@@ -293,6 +293,9 @@ class CarPlayHostActivity : ComponentActivity() {
     @Volatile private var debugLogsEnabled = false
     private var lastStageOverlayShown: Boolean? = null
     private var logcatTap: LogcatTap? = null
+    private val recentSessionMessages = ArrayDeque<String>()
+    private val RECENT_SESSION_MESSAGE_LIMIT = 256
+    private var logcatTap: LogcatTap? = null
     private var moreGesturesToSettings = false
     private var autoStartOnBoot = false
     private var manufacturer = AirPlayPersistence.DEFAULT_MANUFACTURER
@@ -3875,8 +3878,15 @@ class CarPlayHostActivity : ComponentActivity() {
         }
     }
 
-    private fun appendFileLog(message: String, timestampMillis: Long) =
+    private fun appendFileLog(message: String, timestampMillis: Long) {
         sessionLog?.appendTimestamped(message, timestampMillis)
+        synchronized(recentSessionMessages) {
+            recentSessionMessages.addLast(message)
+            while (recentSessionMessages.size > RECENT_SESSION_MESSAGE_LIMIT) {
+                recentSessionMessages.removeFirst()
+            }
+        }
+    }
 
     private fun formattedLogLine(message: String, nowMillis: Long): String =
         "${SimpleDateFormat("HH:mm:ss.SSS", Locale.US).format(Date(nowMillis))}  $message"
@@ -3894,8 +3904,12 @@ class CarPlayHostActivity : ComponentActivity() {
         }
         sessionLog = activeLog
         if (logcatTap == null) {
-            logcatTap = LogcatTap { message -> runCatching { sessionLog?.append(message) } }
-                .also { it.start() }
+            logcatTap = LogcatTap(
+                append = { message -> runCatching { sessionLog?.append(message) } },
+                isAlreadyLogged = { message ->
+                    synchronized(recentSessionMessages) { message in recentSessionMessages }
+                },
+            ).also { it.start() }
         }
     }
 

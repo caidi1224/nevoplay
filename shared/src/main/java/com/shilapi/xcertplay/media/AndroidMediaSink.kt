@@ -166,6 +166,9 @@ private class VideoDecoder(
     private var inputRetries = 0
     private var syncSkips = 0
     private var maxOutputAgeUs = 0L
+    private var maxReleaseUs = 0L
+    private var slowReleases = 0
+    private var lowLatencyApplied = false
     private var needsKeyFrame = false
     private var lastKeyFrameRequestNs = 0L
     @Volatile private var requestedSurface: Surface? = surface
@@ -298,7 +301,10 @@ private class VideoDecoder(
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
                 next.codecInfo.getCapabilitiesForType(mime)
                     .isFeatureSupported(MediaCodecInfo.CodecCapabilities.FEATURE_LowLatency)
-            ) format.setInteger(MediaFormat.KEY_LOW_LATENCY, 1)
+            ) {
+                format.setInteger(MediaFormat.KEY_LOW_LATENCY, 1)
+                lowLatencyApplied = true
+            }
             next.configure(format, surface, null, 0)
             next.start()
         } catch (error: Exception) {
@@ -327,7 +333,11 @@ private class VideoDecoder(
         Log.i(TAG, "video SPS parameters=$parameters negotiated=${width}x$height inputFormat=$format")
         renderedFrameLogged = false
         submittedFrameLogged = false
-        Log.i(TAG, "video decoder configured name=${next.name} mime=$mime; waiting for random access")
+        Log.i(
+            TAG,
+            "video decoder configured name=${next.name} mime=$mime " +
+                "lowLatency=$lowLatencyApplied; waiting for random access",
+        )
     }
 
     private fun createDecoder(mime: String): MediaCodec {
@@ -423,7 +433,16 @@ private class VideoDecoder(
                         info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG == 0
                     outputCount++
                     maxOutputAgeUs = maxOf(maxOutputAgeUs, System.nanoTime() / 1000 - info.presentationTimeUs)
+                    // releaseOutputBuffer(render=true) hands the frame to the compositor and can block
+                    // until a buffer is free, so its cost separates a slow compositor from a slow
+                    // decoder - the two need opposite fixes.
+                    val releaseStart = System.nanoTime()
                     codec.releaseOutputBuffer(index, render)
+                    val releaseUs = (System.nanoTime() - releaseStart) / 1000
+                    if (render) {
+                        maxReleaseUs = maxOf(maxReleaseUs, releaseUs)
+                        if (releaseUs >= SLOW_RELEASE_US) slowReleases++
+                    }
                     if (render && !renderedFrameLogged) {
                         renderedFrameLogged = true
                         Log.i(TAG, "video decoder rendered first frame bytes=${info.size}")
@@ -442,7 +461,8 @@ private class VideoDecoder(
             val seconds = (now - statsStartNs) / 1e9
             Log.i(TAG, "video stats inputFps=${inputCount / seconds} decodedFps=${outputCount / seconds} " +
                 "inputRetries=$inputRetries syncSkips=$syncSkips queued=${queue.size} " +
-                "maxOutputAgeMs=${maxOutputAgeUs / 1000} waitingForSync=${syncGate?.waitingForRandomAccess}")
+                "maxOutputAgeMs=${maxOutputAgeUs / 1000} maxReleaseMs=${maxReleaseUs / 1000} " +
+                "slowReleases=$slowReleases waitingForSync=${syncGate?.waitingForRandomAccess}")
         }
         statsStartNs = now
         inputCount = 0
@@ -450,6 +470,8 @@ private class VideoDecoder(
         inputRetries = 0
         syncSkips = 0
         maxOutputAgeUs = 0
+        maxReleaseUs = 0
+        slowReleases = 0
     }
 
     private fun logOutputFormat(format: MediaFormat) {
@@ -490,6 +512,7 @@ private class VideoDecoder(
     private companion object {
         const val TAG = "xcertplay-usb"
         const val MAX_INPUT_SIZE = 8 * 1024 * 1024
+        const val SLOW_RELEASE_US = 30_000L
         const val INPUT_STALL_NS = 2_000_000_000L
         const val KEY_FRAME_REQUEST_INTERVAL_NS = 2_000_000_000L
         val START_CODE = byteArrayOf(0x00, 0x00, 0x00, 0x01)

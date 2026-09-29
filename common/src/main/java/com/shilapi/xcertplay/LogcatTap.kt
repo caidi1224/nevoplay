@@ -16,7 +16,10 @@ import java.util.concurrent.atomic.AtomicBoolean
  * without READ_LOGS, and filtering by pid keeps other processes out. If the command is unavailable
  * (some vendor builds restrict it) the failure is written to the session log rather than hidden.
  */
-class LogcatTap(private val append: (String) -> Unit) : Closeable {
+class LogcatTap(
+    private val append: (String) -> Unit,
+    private val isAlreadyLogged: (String) -> Boolean = { false },
+) : Closeable {
     private val started = AtomicBoolean(false)
     private val closed = AtomicBoolean(false)
     private var process: Process? = null
@@ -41,6 +44,10 @@ class LogcatTap(private val append: (String) -> Unit) : Closeable {
             append("logcat tap attached pid=$pid")
             child.inputStream.bufferedReader().forEachLine { line ->
                 if (closed.get()) return@forEachLine
+                // The AirPlay layer logs the same text to logcat and to the session log, so without
+                // this filter most lines land in the file two or three times. The message part is
+                // everything after the tag separator.
+                if (isAlreadyLogged(line.substringAfter(": ", line))) return@forEachLine
                 append("logcat $line")
             }
             append("logcat tap ended")
