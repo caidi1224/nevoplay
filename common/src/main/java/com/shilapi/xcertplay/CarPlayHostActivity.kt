@@ -417,6 +417,9 @@ class CarPlayHostActivity : ComponentActivity() {
             resources.getBoolean(R.bool.config_advanced_audio_channel_mapping)
         airPlayIdentity = AirPlayPersistence.loadIdentity(this)
         loadPersistedSettings()
+        // Optional and self-contained: records whether the Qiyuan vehicle-signal service authorises
+        // this app. The callback can arrive on a binder thread, so logging hops to the UI thread.
+        QiyuanVehicleSignals.probeOnce(this) { message -> runOnUiThread { appendLog(message) } }
         locationPermissionAvailable = hasFineLocationPermission()
         val root = buildContentView()
         setContentView(root)
