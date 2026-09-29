@@ -45,6 +45,26 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
+      - name: Prepare signing key
+        # Hosted runners are ephemeral, so the SDK's debug keystore is regenerated on every run and
+        # each build ended up with a different signature - a new APK could never update the previous
+        # one. The same fixed key is used for every build here, which makes updates installable.
+        # Without the secret (any other fork) nothing is written and Gradle falls back to the
+        # per-run debug key, so the build still works.
+        env:
+          KEYSTORE_BASE64: ${{ secrets.FORK_KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "No signing key configured; falling back to the per-run debug keystore."
+            exit 0
+          fi
+          echo "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/xcertplay.p12"
+          echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/xcertplay.p12" >> "$GITHUB_ENV"
+          echo "ANDROID_KEYSTORE_PASSWORD=${{ secrets.FORK_KEYSTORE_PASSWORD }}" >> "$GITHUB_ENV"
+          echo "ANDROID_KEY_ALIAS=${{ secrets.FORK_KEY_ALIAS }}" >> "$GITHUB_ENV"
+          echo "ANDROID_KEY_PASSWORD=${{ secrets.FORK_KEYSTORE_PASSWORD }}" >> "$GITHUB_ENV"
+          echo "Signing debug APKs with the fixed key (${{ secrets.FORK_KEY_ALIAS }})."
+
       - name: Test and build debug APKs
         run: >-
           ./gradlew
