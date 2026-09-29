@@ -28,3 +28,6 @@ mobile/debug/
 Thumbs.db
 *.log
 /.idea
+
+# 生成的 UI 提案截图（docs/ui-demo-ios26.html 渲染产物）
+docs/ui-demo/

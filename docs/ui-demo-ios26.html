@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>xcertplay · iOS 26 风格 UI 提案</title>
+<style>
+  /* ---------------------------------------------------------------
+     设计语言：iOS 26 "Liquid Glass" + DiAuto 的暗色编辑式排版
+     - 玻璃层：backdrop blur + 饱和度提升 + 半透明白叠加
+     - 高光边缘：inset 顶部亮线 + 底部暗线，模拟玻璃厚度
+     - 大圆角(连续曲率感) + 悬浮胶囊控件
+     - 强调色：iOS 蓝 #0A84FF，辅以 DiAuto 的淡薰衣草色
+     --------------------------------------------------------------- */
+  :root {
+    --blue: #0A84FF;
+    --lav: #b9ccf8;
+    --ink: #05070c;
+    --ink-2: #0b1018;
+    --text: #f2f5fb;
+    --text-2: rgba(226, 234, 248, .62);
+    --text-3: rgba(200, 214, 236, .38);
+    --hair: rgba(255, 255, 255, .09);
+    --glass: rgba(255, 255, 255, .075);
+    --glass-2: rgba(255, 255, 255, .12);
+    --radius-xl: 34px;
+    --radius-lg: 26px;
+    --radius-md: 18px;
+    --radius-pill: 999px;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: #06080d; }
+  body {
+    font-family: -apple-system, "SF Pro Display", "SF Pro Text", "PingFang SC",
+                 "Helvetica Neue", system-ui, sans-serif;
+    color: var(--text);
+    -webkit-font-smoothing: antialiased;
+  }
+  .screen {
+    position: relative;
+    width: 1600px; height: 1000px;
+    overflow: hidden;
+    background: radial-gradient(120% 90% at 12% 0%, #101a2e 0%, transparent 55%),
+                radial-gradient(90% 80% at 100% 100%, #1a1430 0%, transparent 60%),
+                linear-gradient(160deg, #070b12 0%, #05070c 60%, #04060a 100%);
+    isolation: isolate;
+  }
+  /* 背景光斑：玻璃需要后面有东西可模糊，否则看不出材质 */
+  .blob { position: absolute; border-radius: 50%; filter: blur(95px); opacity: .2; }
+  .blob.a { width: 560px; height: 560px; left: -160px; top: -200px; background: #1d4ed8; }
+  .blob.b { width: 480px; height: 480px; right: -140px; bottom: -180px; background: #6d28d9; }
+  .blob.c { width: 340px; height: 340px; left: 44%; bottom: -160px; background: #0e7490; opacity: .16; }
+  /* 暗色渐晕：不管光斑怎么摆，内容始终落在足够深的底上 */
+  .veil { position: absolute; inset: 0;
+          background: radial-gradient(120% 100% at 50% 50%, transparent 30%, rgba(2,4,8,.55) 100%); }
+
+  /* ---------- 玻璃基元 ---------- */
+  .glass {
+    background: var(--glass);
+    backdrop-filter: blur(30px) saturate(180%);
+    -webkit-backdrop-filter: blur(30px) saturate(180%);
+    border: 1px solid rgba(255, 255, 255, .12);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .20),
+                inset 0 -1px 0 rgba(0, 0, 0, .30),
+                0 26px 60px rgba(0, 0, 0, .45);
+  }
+  .glass-strong {
+    background: var(--glass-2);
+    backdrop-filter: blur(44px) saturate(190%);
+    -webkit-backdrop-filter: blur(44px) saturate(190%);
+    border: 1px solid rgba(255, 255, 255, .17);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .30),
+                inset 0 -1px 0 rgba(0, 0, 0, .35),
+                0 30px 70px rgba(0, 0, 0, .52);
+  }
+  .card { border-radius: var(--radius-xl); padding: 34px 36px; }
+  .pill { border-radius: var(--radius-pill); }
+
+  /* ---------- 顶部品牌行 ---------- */
+  .topbar { position: absolute; inset: 46px 52px auto 52px; display: flex;
+            align-items: center; justify-content: space-between; }
+  .brand { display: flex; align-items: center; gap: 14px; }
+  .mark { width: 46px; height: 46px; }
+  .brand b { font-size: 25px; font-weight: 700; letter-spacing: -.4px; }
+  .micro { font-size: 13px; letter-spacing: 2.4px; text-transform: uppercase;
+           color: var(--text-3); font-weight: 600; }
+
+  /* ---------- 编辑式标题 ---------- */
+  .eyebrow { font-size: 14px; letter-spacing: 2.6px; text-transform: uppercase;
+             color: var(--text-3); font-weight: 600; margin-bottom: 18px; }
+  h1 { margin: 0; font-size: 66px; line-height: 1.04; letter-spacing: -2.2px; font-weight: 700; }
+  .sub { margin-top: 20px; font-size: 23px; line-height: 1.5; color: var(--text-2); font-weight: 400; }
+
+  /* ---------- 主按钮 ---------- */
+  .btn-primary {
+    display: flex; align-items: center; justify-content: center; gap: 14px;
+    height: 92px; border-radius: var(--radius-pill);
+    background: linear-gradient(180deg, #cfe0ff 0%, #a9c6fb 100%);
+    color: #0a1424; font-size: 27px; font-weight: 650; letter-spacing: -.3px;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .85),
+                0 18px 40px rgba(120, 160, 255, .28);
+    border: none;
+  }
+  .btn-ghost {
+    display: flex; align-items: center; justify-content: center; gap: 12px;
+    height: 82px; border-radius: var(--radius-pill);
+    background: var(--glass); color: var(--text);
+    border: 1px solid rgba(255, 255, 255, .13);
+    font-size: 24px; font-weight: 550;
+    backdrop-filter: blur(26px) saturate(170%);
+    -webkit-backdrop-filter: blur(26px) saturate(170%);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .18);
+  }
+  .caption { margin-top: 12px; text-align: center; font-size: 17px; color: var(--text-3); }
+
+  /* ---------- 底部悬浮玻璃坞 ---------- */
+  .dock { position: absolute; left: 50%; transform: translateX(-50%); bottom: 40px;
+          display: flex; align-items: center; gap: 10px; padding: 12px 14px;
+          border-radius: var(--radius-pill); }
+  .chip { display: flex; align-items: center; gap: 10px; height: 56px; padding: 0 22px;
+          border-radius: var(--radius-pill); background: rgba(255, 255, 255, .06);
+          border: 1px solid rgba(255, 255, 255, .10); font-size: 19px; color: var(--text-2); }
+  .chip.on { color: var(--text); background: rgba(10, 132, 255, .18);
+             border-color: rgba(10, 132, 255, .42); }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: #34d399;
+         box-shadow: 0 0 12px #34d399; }
+  .dot.off { background: rgba(255, 255, 255, .3); box-shadow: none; }
+
+  /* 版本角标：无画面时可见，有画面时被覆盖（本次已实现的行为） */
+  .buildstamp { position: absolute; right: 46px; bottom: 46px; font-size: 16px;
+                color: var(--text-3); padding: 11px 18px; border-radius: var(--radius-pill);
+                background: rgba(0, 0, 0, .28); border: 1px solid rgba(255, 255, 255, .07); }
+
+  /* ---------- 设置：搜索 + 分类卡 ---------- */
+  .search { display: flex; align-items: center; gap: 14px; height: 72px; padding: 0 26px;
+            border-radius: var(--radius-pill); margin: 34px 0 30px; color: var(--text-3);
+            font-size: 21px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; }
+  .cat { display: flex; align-items: center; gap: 22px; padding: 28px 30px;
+         border-radius: var(--radius-lg); }
+  .cat .ic { width: 58px; height: 58px; border-radius: 17px; display: grid; place-items: center;
+             background: rgba(10, 132, 255, .16); border: 1px solid rgba(10, 132, 255, .26); }
+  .cat h3 { margin: 0; font-size: 25px; font-weight: 620; letter-spacing: -.4px; }
+  .cat p { margin: 6px 0 0; font-size: 17px; color: var(--text-3); }
+  .cat .chev { margin-left: auto; color: var(--text-3); font-size: 26px; }
+
+  /* ---------- 设置：iOS 式分组内嵌列表 ---------- */
+  .group { border-radius: var(--radius-lg); overflow: hidden; margin-bottom: 26px; }
+  .row { display: flex; align-items: center; gap: 20px; padding: 24px 30px;
+         border-top: 1px solid var(--hair); }
+  .row:first-child { border-top: none; }
+  .row .label { font-size: 24px; font-weight: 520; letter-spacing: -.2px; }
+  .row .value { margin-left: auto; font-size: 22px; color: var(--text-3); }
+  /* iOS 开关 */
+  .switch { margin-left: auto; width: 78px; height: 46px; border-radius: var(--radius-pill);
+            background: rgba(255, 255, 255, .16); position: relative; flex: none;
+            box-shadow: inset 0 1px 2px rgba(0, 0, 0, .35); }
+  .switch i { position: absolute; top: 3px; left: 3px; width: 40px; height: 40px; border-radius: 50%;
+              background: #fff; box-shadow: 0 2px 6px rgba(0, 0, 0, .35); }
+  .switch.on { background: #30d158; }
+  .switch.on i { left: 35px; }
+  /* 分段控件 */
+  .seg { margin-left: auto; display: flex; padding: 5px; border-radius: var(--radius-pill);
+         background: rgba(255, 255, 255, .10); border: 1px solid rgba(255, 255, 255, .10); }
+  .seg span { padding: 12px 26px; border-radius: var(--radius-pill); font-size: 20px; color: var(--text-2); }
+  .seg span.sel { background: rgba(255, 255, 255, .9); color: #0a1424; font-weight: 620;
+                  box-shadow: 0 6px 18px rgba(0, 0, 0, .35); }
+  /* 滑杆 */
+  .slider { margin-left: auto; display: flex; align-items: center; gap: 18px; }
+  .track { width: 300px; height: 10px; border-radius: var(--radius-pill);
+           background: rgba(255, 255, 255, .16); position: relative; }
+  .track i { position: absolute; left: 0; top: 0; bottom: 0; width: 100%;
+             border-radius: var(--radius-pill); background: linear-gradient(90deg, #7fb0ff, #cfe0ff); }
+  .knob { position: absolute; right: -13px; top: -12px; width: 34px; height: 34px; border-radius: 50%;
+          background: #fff; box-shadow: 0 4px 14px rgba(0, 0, 0, .45); }
+  .sect { font-size: 14px; letter-spacing: 2.2px; text-transform: uppercase; color: var(--text-3);
+          font-weight: 600; margin: 0 8px 14px; }
+
+  /* ---------- 投屏中的玻璃控件 ---------- */
+  .videofake { position: absolute; inset: 0;
+    background:
+      radial-gradient(60% 50% at 30% 35%, #1b3a2a 0%, transparent 60%),
+      radial-gradient(50% 60% at 75% 70%, #123048 0%, transparent 62%),
+      linear-gradient(140deg, #0d1a14 0%, #0a1420 55%, #0b1220 100%); }
+  .vdash { position: absolute; border-radius: 999px; background: rgba(120, 220, 170, .22); }
+  .toast { position: absolute; left: 52px; top: 46px; display: flex; align-items: center; gap: 14px;
+           padding: 16px 24px; border-radius: var(--radius-pill); font-size: 20px; }
+  .livechip { position: absolute; left: 52px; bottom: 46px; display: flex; align-items: center;
+              gap: 12px; padding: 14px 22px; border-radius: var(--radius-pill); font-size: 19px;
+              color: var(--text-2); }
+</style>
+</head>
+<body>
+
+<!-- ============================ 1. 主页面（未连接） ============================ -->
+<section class="screen" id="s1">
+  <div class="veil"></div>
+  <div class="blob a"></div><div class="blob b"></div><div class="blob c"></div>
+
+  <div class="topbar">
+    <div class="brand">
+      <svg class="mark" viewBox="0 0 48 48" fill="none">
+        <rect x="2" y="2" width="44" height="44" rx="13" fill="#0b8f5a"/>
+        <path d="M24 12.5l11 23H13l11-23z" fill="#eafff5" opacity=".95"/>
+        <path d="M24 21l5.6 12.4h-11.2L24 21z" fill="#0b8f5a"/>
+      </svg>
+      <b>xcertplay</b>
+    </div>
+    <div class="micro">启源 A07 · 2560×1600</div>
+  </div>
+
+  <div style="position:absolute; left:78px; top:236px; width:760px;">
+    <div class="eyebrow">Wireless CarPlay</div>
+    <h1>等待你的<br/>iPhone</h1>
+    <div class="sub">先在车机的蓝牙设置里配对手机,<br/>然后点下面的按钮。</div>
+  </div>
+
+  <!-- 左：主操作卡 -->
+  <div class="glass card" style="position:absolute; left:78px; top:548px; width:760px;">
+    <div class="micro" style="margin-bottom:18px;">无线 CarPlay</div>
+    <button class="btn-primary" style="width:100%;">
+      <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#0a1424" stroke-width="2.2"
+           stroke-linecap="round" stroke-linejoin="round"><path d="M8 3h5a5 5 0 010 10H8zM8 13v8"/><path d="M8 3v18" opacity=".55"/></svg>
+      连接 iPhone
+    </button>
+    <div style="margin-top:20px; font-size:18px; line-height:1.55; color:var(--text-2);">
+      保持蓝牙与 Wi-Fi 打开。首次连接会在手机上确认一次。
+    </div>
+  </div>
+
+  <!-- 右：次操作 -->
+  <div style="position:absolute; right:78px; top:548px; width:600px;">
+    <button class="btn-ghost" style="width:100%;">
+      <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round"><path d="M12 21V6M12 6l-3 3M12 6l3 3M9 14h6M9 17h6"/><circle cx="12" cy="4.5" r="1.8" fill="currentColor"/></svg>
+      用 USB 连接
+    </button>
+    <div class="caption">没有无线?插上数据线即可。</div>
+
+    <button class="btn-ghost" style="width:100%; margin-top:30px;">
+      <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="3.4"/>
+        <path d="M19.4 15a1.7 1.7 0 00.34 1.87l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.7 1.7 0 00-1.87-.34 1.7 1.7 0 00-1.03 1.56V21a2 2 0 11-4 0v-.09A1.7 1.7 0 008.9 19.3a1.7 1.7 0 00-1.87.34l-.06.06a2 2 0 11-2.83-2.83l.06-.06A1.7 1.7 0 004.6 15a1.7 1.7 0 00-1.56-1.03H3a2 2 0 110-4h.09A1.7 1.7 0 004.6 8.94a1.7 1.7 0 00-.34-1.87l-.06-.06a2 2 0 112.83-2.83l.06.06A1.7 1.7 0 008.96 4.6 1.7 1.7 0 0010 3.04V3a2 2 0 114 0v.09a1.7 1.7 0 001.03 1.56 1.7 1.7 0 001.87-.34l.06-.06a2 2 0 112.83 2.83l-.06.06A1.7 1.7 0 0019.4 8.94v.12a1.7 1.7 0 001.56 1.03H21a2 2 0 110 4h-.09a1.7 1.7 0 00-1.51 1.03z"/>
+      </svg>
+      设置
+    </button>
+    <div class="caption">分辨率、音量、MFi 通道等。</div>
+  </div>
+
+  <!-- 底部玻璃坞：状态 -->
+  <div class="glass-strong dock">
+    <div class="chip on"><span class="dot"></span>蓝牙已连接</div>
+    <div class="chip"><span class="dot off"></span>Wi-Fi Direct</div>
+    <div class="chip"><span class="dot off"></span>MFi 协处理器</div>
+  </div>
+
+  <div class="buildstamp">v1.3.1.21 · 2026-09-29</div>
+</section>
+
+<!-- ============================ 2. 主页面（投屏中） ============================ -->
+<section class="screen" id="s2">
+  <div class="veil"></div>
+  <div class="videofake"></div>
+  <!-- 用几条“地图道路”示意画面，不是真实截图 -->
+  <div class="vdash" style="left:120px; top:300px; width:900px; height:26px; transform:rotate(-8deg);"></div>
+  <div class="vdash" style="left:640px; top:180px; width:26px; height:760px; transform:rotate(6deg);"></div>
+  <div class="vdash" style="left:260px; top:640px; width:1100px; height:20px; opacity:.6;"></div>
+  <div class="vdash" style="left:1180px; top:420px; width:20px; height:520px; opacity:.5;"></div>
+  <div class="blob a" style="opacity:.28"></div>
+
+  <div class="glass toast">
+    <span class="dot"></span> 已连接 · 无线 CarPlay
+  </div>
+
+  <!-- 悬浮玻璃坞：设置在左下（本 fork 的按钮位置） -->
+  <div class="glass-strong dock">
+    <div class="chip"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/>
+      <path d="M19.4 15a1.7 1.7 0 00.34 1.87l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.7 1.7 0 00-1.87-.34 1.7 1.7 0 00-1.03 1.56V21a2 2 0 11-4 0v-.09A1.7 1.7 0 008.9 19.3a1.7 1.7 0 00-1.87.34l-.06.06a2 2 0 11-2.83-2.83l.06-.06A1.7 1.7 0 004.6 15a1.7 1.7 0 00-1.56-1.03H3a2 2 0 110-4h.09A1.7 1.7 0 004.6 8.94a1.7 1.7 0 00-.34-1.87l-.06-.06a2 2 0 112.83-2.83l.06.06A1.7 1.7 0 008.96 4.6 1.7 1.7 0 0010 3.04V3a2 2 0 114 0v.09a1.7 1.7 0 001.03 1.56 1.7 1.7 0 001.87-.34l.06-.06a2 2 0 112.83 2.83l-.06.06A1.7 1.7 0 0019.4 8.94v.12a1.7 1.7 0 001.56 1.03H21a2 2 0 110 4h-.09a1.7 1.7 0 00-1.51 1.03z"/>
+      </svg>设置</div>
+    <div class="chip"><span class="dot off"></span>断开</div>
+    <div class="chip"><span class="dot"></span>25 fps · HEVC</div>
+  </div>
+
+  <div class="livechip glass">
+    <span class="dot"></span>触摸→画面 42ms
+  </div>
+
+  <!-- 注意：这里没有版本角标 —— 画面出现后它被覆盖（本次已实现） -->
+</section>
+
+<!-- ============================ 3. 设置：分类 ============================ -->
+<section class="screen" id="s3">
+  <div class="veil"></div>
+  <div class="blob a" style="opacity:.34"></div><div class="blob b" style="opacity:.3"></div>
+
+  <div style="position:absolute; left:78px; right:78px; top:0;">
+    <div class="topbar" style="position:static; margin:44px 0 0;">
+      <div class="brand" style="gap:18px;">
+        <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M15 5l-7 7 7 7"/></svg>
+        <b style="font-size:27px;">设置</b>
+      </div>
+      <div class="micro">v1.3.1.21</div>
+    </div>
+
+    <h1 style="font-size:56px; margin-top:46px;">你的车,你的方式。</h1>
+    <div class="sub" style="font-size:22px;">连接、显示与声音,都在一处。</div>
+
+    <div class="glass search">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+      搜索设置
+    </div>
+
+    <div class="grid">
+      <div class="glass cat"><div class="ic">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#7fb0ff" stroke-width="2"
+             stroke-linecap="round"><path d="M4 10a12 12 0 0116 0M7 13.5a8 8 0 0110 0"/><circle cx="12" cy="18" r="1.6" fill="#7fb0ff"/></svg>
+      </div><div><h3>连接</h3><p>无线 CarPlay、热点状态</p></div><div class="chev">›</div></div>
+
+      <div class="glass cat"><div class="ic">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#7fb0ff" stroke-width="2"
+             stroke-linecap="round"><rect x="3" y="5" width="18" height="12" rx="2.5"/><path d="M8 20h8"/></svg>
+      </div><div><h3>显示与视频</h3><p>分辨率、缩放、帧率、HEVC</p></div><div class="chev">›</div></div>
+
+      <div class="glass cat"><div class="ic">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#7fb0ff" stroke-width="2"
+             stroke-linecap="round"><path d="M11 5L6 9H3v6h3l5 4V5z"/><path d="M16 9a4 4 0 010 6"/></svg>
+      </div><div><h3>音频</h3><p>麦克风增益、音量通道</p></div><div class="chev">›</div></div>
+
+      <div class="glass cat"><div class="ic">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#7fb0ff" stroke-width="2"
+             stroke-linecap="round"><circle cx="12" cy="8.5" r="3.5"/><path d="M5 20c1.5-4 4-6 7-6s5.5 2 7 6"/></svg>
+      </div><div><h3>身份与外观</h3><p>车名、AirPlay 图标、驾驶侧</p></div><div class="chev">›</div></div>
+
+      <div class="glass cat"><div class="ic">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#7fb0ff" stroke-width="2"
+             stroke-linecap="round"><rect x="3" y="4" width="18" height="14" rx="2.5"/><path d="M3 9h18"/></svg>
+      </div><div><h3>窗口</h3><p>全屏、安全区域、状态栏</p></div><div class="chev">›</div></div>
+
+      <div class="glass cat"><div class="ic">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#7fb0ff" stroke-width="2"
+             stroke-linecap="round"><path d="M12 3v9l6 3"/><circle cx="12" cy="12" r="9"/></svg>
+      </div><div><h3>启动</h3><p>开机自启、上次配置</p></div><div class="chev">›</div></div>
+
+      <div class="glass cat"><div class="ic">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#7fb0ff" stroke-width="2"
+             stroke-linecap="round"><path d="M12 21s7-6 7-11a7 7 0 10-14 0c0 5 7 11 7 11z"/><circle cx="12" cy="10" r="2.5"/></svg>
+      </div><div><h3>定位</h3><p>向 iPhone 上报位置</p></div><div class="chev">›</div></div>
+
+      <div class="glass cat"><div class="ic">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#7fb0ff" stroke-width="2"
+             stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
+      </div><div><h3>诊断</h3><p>日志、构建号、MFi 状态</p></div><div class="chev">›</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ 4. 设置：详情（iOS 控件） ============================ -->
+<section class="screen" id="s4">
+  <div class="veil"></div>
+  <div class="blob a" style="opacity:.3"></div><div class="blob c" style="opacity:.26"></div>
+
+  <div style="position:absolute; left:78px; right:78px; top:0;">
+    <div class="topbar" style="position:static; margin:44px 0 0;">
+      <div class="brand" style="gap:18px;">
+        <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg>
+        <b style="font-size:27px;">显示与视频</b>
+      </div>
+      <div class="micro">设置</div>
+    </div>
+
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:34px; margin-top:40px;">
+      <div>
+        <div class="sect">画面</div>
+        <div class="glass group">
+          <div class="row"><span class="label">分辨率</span><span class="value">2560 × 1600</span></div>
+          <div class="row">
+            <span class="label">显示缩放</span>
+            <span class="slider">
+              <span class="value" style="margin:0;">1.0x</span>
+              <span class="track"><i></i><span class="knob"></span></span>
+            </span>
+          </div>
+          <div class="row">
+            <span class="label">帧率</span>
+            <span class="seg"><span>30</span><span class="sel">50</span><span>60</span></span>
+          </div>
+        </div>
+
+        <div class="sect">编码</div>
+        <div class="glass group">
+          <div class="row"><span class="label">HEVC (H.265)</span><span class="switch on"><i></i></span></div>
+          <div class="row"><span class="label">HEVC 软件解码</span><span class="switch"><i></i></span></div>
+        </div>
+      </div>
+
+      <div>
+        <div class="sect">连接</div>
+        <div class="glass group">
+          <div class="row"><span class="label">无线 CarPlay</span><span class="switch on"><i></i></span></div>
+          <div class="row"><span class="label">热点状态</span><span class="value">已开启</span></div>
+          <div class="row"><span class="label">MFi 通道</span><span class="value">CH341 · 0x11</span></div>
+        </div>
+
+        <div class="sect">诊断</div>
+        <div class="glass group">
+          <div class="row"><span class="label">构建</span><span class="value">2d745fd+run36591191976</span></div>
+          <div class="row"><span class="label">日志文件</span><span class="value">Download/xcertplay/</span></div>
+          <div class="row"><span class="label">日志轮转</span><span class="value">8 代 · 已脱敏</span></div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+    <!-- 悬浮保存按钮：挂在 .screen 上 -->
+    <div class="glass-strong pill" style="position:absolute; left:78px; right:78px; bottom:46px;
+         display:flex; align-items:center; gap:18px; padding:14px 16px 14px 30px;">
+      <div style="font-size:19px; color:var(--text-2);">
+        修改分辨率或缩放会重新与 iPhone 协商画面。
+      </div>
+      <div style="margin-left:auto; display:flex; gap:14px;">
+        <div class="btn-ghost" style="height:74px; padding:0 34px; font-size:22px;">取消</div>
+        <div class="btn-primary" style="height:74px; padding:0 40px; font-size:23px;">保存并重连</div>
+      </div>
+    </div>
+</section>
+
+<script>
+  // 便于截图：?only=1..4 只显示指定屏
+  const only = new URLSearchParams(location.search).get('only');
+  if (only) {
+    document.querySelectorAll('.screen').forEach(s => {
+      if (s.id !== 's' + only) s.remove(); else s.style.margin = '0';
+    });
+  } else {
+    document.querySelectorAll('.screen').forEach(s => s.style.margin = '0 0 60px');
+  }
+</script>
+</body>
+</html>
