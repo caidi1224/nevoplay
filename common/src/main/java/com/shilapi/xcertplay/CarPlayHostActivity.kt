@@ -292,6 +292,7 @@ class CarPlayHostActivity : ComponentActivity() {
     private var advancedAudioChannelMapping = false
     @Volatile private var debugLogsEnabled = false
     private var lastStageOverlayShown: Boolean? = null
+    private var logcatTap: LogcatTap? = null
     private var moreGesturesToSettings = false
     private var autoStartOnBoot = false
     private var manufacturer = AirPlayPersistence.DEFAULT_MANUFACTURER
@@ -641,6 +642,8 @@ class CarPlayHostActivity : ComponentActivity() {
         currentSurface = null
         currentSurfaceTexture = null
         sessionLog?.append("Activity destroyed")
+        logcatTap?.close()
+        logcatTap = null
         sessionLog?.close()
         sessionLog = null
         super.onDestroy()
@@ -3890,6 +3893,10 @@ class CarPlayHostActivity : ComponentActivity() {
             )
         }
         sessionLog = activeLog
+        if (logcatTap == null) {
+            logcatTap = LogcatTap { message -> runCatching { sessionLog?.append(message) } }
+                .also { it.start() }
+        }
     }
 
     /**
