@@ -36,6 +36,14 @@ class ScreenStream(private val key: ByteArray) : Closeable {
     }
 
     private var nalLengthSize = 4
+    // Frame arrival timing. A stall that arrives with the frames themselves (a gap in this series)
+    // points at the sender or the wireless link; smooth arrivals with a slow decode points at the
+    // decoder. The two need opposite fixes, so the distinction is measured rather than assumed.
+    private var arrivalFrames = 0
+    private var arrivalBytes = 0L
+    private var lastArrivalNs = 0L
+    private var maxArrivalGapUs = 0L
+    private var arrivalStatsStartNs = System.nanoTime()
     private val closed = AtomicBoolean(false)
     private val frameCounter = AtomicLong(0)
     private val firstFrameLogged = AtomicBoolean(false)
@@ -94,7 +102,25 @@ class ScreenStream(private val key: ByteArray) : Closeable {
                 val body = readFully(input, bodySize) ?: break
                 bytes += bodySize
                 messages++
+                val now = System.nanoTime()
+                if (lastArrivalNs != 0L) {
+                    maxArrivalGapUs = maxOf(maxArrivalGapUs, (now - lastArrivalNs) / 1_000L)
+                }
+                lastArrivalNs = now
+                arrivalFrames++
+                arrivalBytes += bodySize
                 onMessage(header, body)
+                if (now - arrivalStatsStartNs >= ARRIVAL_STATS_WINDOW_NS) {
+                    val windowMs = (now - arrivalStatsStartNs) / 1_000_000L
+                    log(
+                        "screen stream stats frames=$arrivalFrames bytes=$arrivalBytes " +
+                            "maxGapMs=${maxArrivalGapUs / 1_000} windowMs=$windowMs",
+                    )
+                    arrivalFrames = 0
+                    arrivalBytes = 0L
+                    maxArrivalGapUs = 0L
+                    arrivalStatsStartNs = now
+                }
             }
         } catch (error: Exception) {
             failure = error
@@ -156,6 +182,7 @@ class ScreenStream(private val key: ByteArray) : Closeable {
         const val OP_VIDEO_FRAME = 0
         const val OP_VIDEO_CONFIG = 1
         const val MAX_BODY = 8 * 1024 * 1024
+        const val ARRIVAL_STATS_WINDOW_NS = 5_000_000_000L
     }
 }
 

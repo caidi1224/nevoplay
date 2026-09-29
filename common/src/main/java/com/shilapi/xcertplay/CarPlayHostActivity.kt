@@ -299,6 +299,7 @@ class CarPlayHostActivity : ComponentActivity() {
     // Correlates stutter spikes with touch/HID bursts: both are timestamped, so a window with
     // many reports can be compared against the decoder's output-age spikes.
     private var touchReportsSinceStats = 0
+    private var logLinesSinceStats = 0
     private var touchStatsPosted = false
     private var moreGesturesToSettings = false
     private var autoStartOnBoot = false
@@ -3851,8 +3852,13 @@ class CarPlayHostActivity : ComponentActivity() {
             {
                 touchStatsPosted = false
                 val reports = touchReportsSinceStats
+                val logLines = logLinesSinceStats
                 touchReportsSinceStats = 0
-                if (reports > 0) appendLog("touch stats reports=$reports window=${TOUCH_STATS_WINDOW_MILLIS}ms")
+                logLinesSinceStats = 0
+                appendLog(
+                    "load stats touchReports=$reports logLines=$logLines " +
+                        "window=${TOUCH_STATS_WINDOW_MILLIS}ms",
+                )
             },
             TOUCH_STATS_WINDOW_MILLIS,
         )
@@ -3923,6 +3929,7 @@ class CarPlayHostActivity : ComponentActivity() {
     }
 
     private fun appendFileLog(message: String, timestampMillis: Long) {
+        logLinesSinceStats++
         sessionLog?.appendTimestamped(message, timestampMillis)
         synchronized(recentSessionMessages) {
             recentSessionMessages.addLast(message)
