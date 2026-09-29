@@ -911,7 +911,24 @@ class CarPlayHostActivity : ComponentActivity() {
         )
 
         scaleMenuTextSize(column, menuTextScale())
-        return column
+        // Content width follows the panel but stops growing so an ultra-wide display does not stretch
+        // one column of text across the whole screen; a ScrollView keeps short panels usable.
+        val holder = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        column.layoutParams = LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+        )
+        holder.addView(column)
+        return ScrollView(this).apply {
+            isFillViewport = false
+            addView(
+                holder,
+                ViewGroup.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                ),
+            )
+        }
     }
 
     private fun buildSettingsMenu(): View {
@@ -4405,10 +4422,24 @@ class CarPlayHostActivity : ComponentActivity() {
     private fun dp(value: Int): Int =
         (value * menuScale() * resources.displayMetrics.density).toInt()
 
-    /** The single layout/text scale for this panel, derived from its width. */
-    private fun menuScale(): Float =
-        (resources.displayMetrics.widthPixels / MENU_TEXT_SCALE_REFERENCE_WIDTH_PX)
-            .coerceIn(MENU_LAYOUT_SCALE_MIN, MENU_LAYOUT_SCALE_MAX)
+    /**
+     * The single layout/text scale for whatever panel this is running on.
+     *
+     * Measured in density-independent units rather than pixels, and constrained by both axes, so a
+     * high-density large panel is not scaled twice (density already accounts for physical size) and a
+     * small or unusually short screen shrinks instead of overflowing. Reference is the 1280x800dp
+     * panel the layouts were drawn against; the floor lets small screens go down to 0.6x.
+     */
+    private fun menuScale(): Float {
+        val metrics = resources.displayMetrics
+        val density = metrics.density.takeIf { it > 0f } ?: 1f
+        val widthDp = metrics.widthPixels / density
+        val heightDp = metrics.heightPixels / density
+        return minOf(
+            widthDp / MENU_LAYOUT_REFERENCE_WIDTH_DP,
+            heightDp / MENU_LAYOUT_REFERENCE_HEIGHT_DP,
+        ).coerceIn(MENU_LAYOUT_SCALE_MIN, MENU_LAYOUT_SCALE_MAX)
+    }
 
     private fun CarPlayStatus.describe(): String = when (this) {
         CarPlayStatus.DiscoveringMfi -> "Preparing MFi authentication"
@@ -4469,8 +4500,12 @@ class CarPlayHostActivity : ComponentActivity() {
         const val LANDSCAPE_SETTINGS_WIDTH_FRACTION = 0.96f
         const val MENU_TEXT_SCALE_REFERENCE_WIDTH_PX = 1920f
         const val MENU_TEXT_SCALE_MAX = 1.5f
-        const val MENU_LAYOUT_SCALE_MIN = 1f
-        const val MENU_LAYOUT_SCALE_MAX = 1.6f
+        /** Layouts are authored against this panel size, in dp. */
+        const val MENU_LAYOUT_REFERENCE_WIDTH_DP = 1280f
+        const val MENU_LAYOUT_REFERENCE_HEIGHT_DP = 800f
+        /** Small screens shrink; the floor keeps touch targets usable on the smallest panels. */
+        const val MENU_LAYOUT_SCALE_MIN = 0.6f
+        const val MENU_LAYOUT_SCALE_MAX = 2f
         const val SETTINGS_COLUMN_GAP_DP = 48
         const val MENU_CATEGORY_TAG = "settings-category"
         const val MENU_FOOTER_TAG = "settings-footer"
