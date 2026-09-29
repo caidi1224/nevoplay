@@ -83,6 +83,7 @@ import com.shilapi.xcertplay.orchestration.isManualHotspotChannelCompatible
 import com.shilapi.xcertplay.transport.Iap2IdentificationConfig
 import com.shilapi.xcertplay.transport.Iap2LocationProvider
 import com.shilapi.xcertplay.transport.UsbDeviceId
+import com.shilapi.xcertplay.host.BuildConfig
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.ArrayDeque
@@ -1272,6 +1273,13 @@ class CarPlayHostActivity : ComponentActivity() {
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT,
             ).apply { topMargin = dp(12) },
+        )
+        content.addView(
+            menuText("Build: ${BuildConfig.BUILD_ID}", 14f, MENU_SECONDARY),
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            ).apply { topMargin = dp(10) },
         )
         content.addView(
             menuText("Log file: $sessionLogDestination", 14f, MENU_SECONDARY),
@@ -3890,7 +3898,8 @@ class CarPlayHostActivity : ComponentActivity() {
             activeLog.reset(
                 "xcertplay log started " +
                     "${SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US).format(Date())} " +
-                    "pid=${Process.myPid()} path=${activeLog.destination}",
+                    "pid=${Process.myPid()} build=${BuildConfig.BUILD_ID} " +
+                    "path=${activeLog.destination}",
             )
         }
         sessionLog = activeLog
