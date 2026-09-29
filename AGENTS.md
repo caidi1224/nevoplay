@@ -143,6 +143,22 @@ CI runs on JDK 25 with Android SDK `platforms;android-37.0`,
 `build-tools;36.0.0`, and `ndk;28.2.13676358`. The same commands work locally
 (give them a long timeout; first run downloads Gradle and the SDK pieces):
 
+```bash
+# what CI runs for every push (dev)
+./gradlew \
+  :shared:testDebugUnitTest \
+  :common:lintDebug :mobile:lintDebug :automotive:lintDebug \
+  :mobile:assembleDebug :automotive:assembleDebug \
+  --stacktrace
+
+# release variant (requires the Android keystore env vars used by CI)
+./gradlew \
+  :shared:testDebugUnitTest \
+  :common:lintRelease :mobile:lintRelease :automotive:lintRelease \
+  :mobile:assembleRelease :automotive:assembleRelease \
+  --stacktrace
+```
+
 ### Local toolchain on this machine
 
 Installed so changes can be compiled **before** pushing - CI is slow and a
@@ -167,23 +183,6 @@ Full debug APK, including the JNI/NDK path and packaging:
 
 ```bash
 ./gradlew :mobile:assembleDebug   # -> mobile/build/outputs/apk/debug/
-```
-
-
-```bash
-# what CI runs for every push (dev)
-./gradlew \
-  :shared:testDebugUnitTest \
-  :common:lintDebug :mobile:lintDebug :automotive:lintDebug \
-  :mobile:assembleDebug :automotive:assembleDebug \
-  --stacktrace
-
-# release variant (requires the Android keystore env vars used by CI)
-./gradlew \
-  :shared:testDebugUnitTest \
-  :common:lintRelease :mobile:lintRelease :automotive:lintRelease \
-  :mobile:assembleRelease :automotive:assembleRelease \
-  --stacktrace
 ```
 
 Debug APKs land in `mobile/build/outputs/apk/debug/` and
