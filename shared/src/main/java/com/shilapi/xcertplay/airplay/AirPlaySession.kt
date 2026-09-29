@@ -474,7 +474,12 @@ class AirPlaySession(
                     debugLog("airplay screen stream type=$type dataPort=${port ?: "rejected"}")
                     if (port != null) {
                         activeStreams.add(type)
-                        result.add(linkedMapOf("type" to type, "dataPort" to port))
+                        // The data stream (130) answer carries a streamID; the screen stream answer did
+                        // not, and that asymmetry is a plausible reason the phone never opened the
+                        // stream it had just negotiated. Cheap to align, so it is aligned.
+                        result.add(
+                            linkedMapOf("type" to type, "streamID" to 1L, "dataPort" to port),
+                        )
                     }
                 }
                 STREAM_TYPE_MAIN_AUDIO, STREAM_TYPE_ALT_AUDIO, STREAM_TYPE_MAIN_HIGH_AUDIO -> {
