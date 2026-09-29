@@ -276,6 +276,14 @@ class CarPlayHostActivity : ComponentActivity() {
 
     /** Set when the vehicle forces its own bar back right after we hid it, so we stop fighting. */
     private var vehicleEnforcesSystemBars = false
+    private var displayRevertStrikes = 0
+    private var lastDisplayRevertUptime = 0L
+
+    /** While now is before this the app stops asking for fullscreen: the window keeps flipping. */
+    private var displayYieldUntilUptime = 0L
+    private var displayYieldSkips = 0
+    private var fullscreenReassertCount = 0
+    private var lastReassertLogUptime = 0L
     private var displayScaleTenths = CarPlayDisplayScale.DEFAULT_TENTHS
     private var hevcEnabled = true
     private var hevcSoftwareDecoderEnabled = false
@@ -583,7 +591,10 @@ class CarPlayHostActivity : ComponentActivity() {
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
-        if (hasFocus) reassertFullscreenIfNeeded()
+        // Deliberately no fullscreen re-assert here. A head unit that pops its own status bar can take
+        // focus while doing so, which turned every appearance of that bar into another hide request of
+        // ours and made the window oscillate between two sizes. onResume still covers coming back from
+        // another app, and the Settings switches still assert the user's choice.
     }
 
     override fun onStop() {
@@ -3456,6 +3467,7 @@ class CarPlayHostActivity : ComponentActivity() {
                 pendingDisplaySize = null
                 mainHandler.removeCallbacks(applyDisplaySize)
                 appendLog("Display returned to ${size.width}x${size.height}; pending change dropped")
+                noteDisplayRevert()
             }
             return
         }
@@ -3463,6 +3475,28 @@ class CarPlayHostActivity : ComponentActivity() {
         pendingDisplaySize = size
         mainHandler.removeCallbacks(applyDisplaySize)
         mainHandler.postDelayed(applyDisplaySize, DISPLAY_CHANGE_DEBOUNCE_MILLIS)
+    }
+
+    /**
+     * Counts a resize that was undone inside the debounce window. A head unit that toggles its own
+     * status bar can do this several times a second, and on such a device the insets never admit
+     * that the bar is visible, so the insets-based latch never arms. The size signal is the one that
+     * demonstrably fires, so the decision to stop touching the bars is taken here instead: after a
+     * burst of reverts the app stops asserting fullscreen, which is what ends the oscillation.
+     */
+    private fun noteDisplayRevert() {
+        val now = android.os.SystemClock.uptimeMillis()
+        if (now - lastDisplayRevertUptime > DISPLAY_REVERT_STRIKE_WINDOW_MILLIS) {
+            displayRevertStrikes = 0
+        }
+        lastDisplayRevertUptime = now
+        displayRevertStrikes++
+        if (displayRevertStrikes < DISPLAY_REVERT_STRIKES || now < displayYieldUntilUptime) return
+        displayYieldUntilUptime = now + DISPLAY_YIELD_MILLIS
+        appendLog(
+            "Window size is oscillating (${displayRevertStrikes} reverts); leaving the system bars " +
+                "alone for ${DISPLAY_YIELD_MILLIS / 1000}s",
+        )
     }
 
     private fun applyDisplaySize(size: DisplaySize) {
@@ -3967,13 +4001,33 @@ class CarPlayHostActivity : ComponentActivity() {
     }
 
     /**
-     * Re-asserts fullscreen from lifecycle events that the bars themselves did not cause. While the
-     * vehicle owns the bars this is skipped: the request would be overridden immediately, which is
-     * exactly the flicker the user sees. The Settings switches reset the latch, so an explicit
-     * choice still wins.
+     * Re-asserts fullscreen from lifecycle events that the bars themselves did not cause. It is
+     * skipped while the vehicle owns the bars, and while the window is oscillating: in both cases
+     * the request comes straight back, which is the flicker the user sees. The Settings switches
+     * reset both latches, so an explicit choice still wins.
+     *
+     * Each re-assert is counted and logged at most once a second, because whether this path is what
+     * drives a fight is exactly what the device log has to show.
      */
     private fun reassertFullscreenIfNeeded() {
+        val now = android.os.SystemClock.uptimeMillis()
+        if (now < displayYieldUntilUptime) {
+            displayYieldSkips++
+            return
+        }
         if (vehicleEnforcesSystemBars) return
+        if (displayYieldSkips > 0) {
+            appendLog("Fullscreen requests resumed after yielding ($displayYieldSkips suppressed)")
+            displayYieldSkips = 0
+        }
+        fullscreenReassertCount++
+        if (now - lastReassertLogUptime >= FULLSCREEN_REASSERT_LOG_INTERVAL_MILLIS) {
+            lastReassertLogUptime = now
+            appendLog(
+                "Re-asserted fullscreen (#$fullscreenReassertCount) " +
+                    "viewport=${videoView?.width}x${videoView?.height}",
+            )
+        }
         applyFullscreenMode()
     }
 
@@ -3981,6 +4035,9 @@ class CarPlayHostActivity : ComponentActivity() {
         vehicleEnforcesSystemBars = false
         systemBarOverrideStrikes = 0
         lastFullscreenRequestUptime = 0L
+        displayRevertStrikes = 0
+        displayYieldUntilUptime = 0L
+        lastDisplayRevertUptime = 0L
     }
 
     // statusBarColor and navigationBarColor are deprecated as of Android 15, where the system draws
@@ -4066,6 +4123,12 @@ class CarPlayHostActivity : ComponentActivity() {
         const val DISPLAY_CHANGE_DEBOUNCE_MILLIS = 500L
         const val SYSTEM_BAR_OVERRIDE_WINDOW_MILLIS = 1_500L
         const val SYSTEM_BAR_OVERRIDE_STRIKES = 2
+
+        /** A burst of undone resizes means the vehicle is toggling its bars; stop touching them. */
+        const val DISPLAY_REVERT_STRIKE_WINDOW_MILLIS = 2_000L
+        const val DISPLAY_REVERT_STRIKES = 4
+        const val DISPLAY_YIELD_MILLIS = 60_000L
+        const val FULLSCREEN_REASSERT_LOG_INTERVAL_MILLIS = 1_000L
         const val RECONNECT_DELAY_MILLIS = 2_000L
         const val IAP_TUNNEL_RECONNECT_DELAY_MILLIS = 15_000L
         const val CONTROLLER_CLOSE_TIMEOUT_MILLIS = 4_000L
