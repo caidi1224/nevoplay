@@ -43,6 +43,8 @@ class ScreenStream(private val key: ByteArray) : Closeable {
     private var arrivalBytes = 0L
     private var lastArrivalNs = 0L
     private var maxArrivalGapUs = 0L
+    private var maxReadUs = 0L
+    private var maxProcessUs = 0L
     private var arrivalStatsStartNs = System.nanoTime()
     private val closed = AtomicBoolean(false)
     private val frameCounter = AtomicLong(0)
@@ -95,30 +97,40 @@ class ScreenStream(private val key: ByteArray) : Closeable {
         try {
             val input = sock.getInputStream()
             while (!closed.get()) {
+                // Socket wait and local processing are timed separately: only that split can tell
+                // "the phone sent nothing" apart from "this thread was held up".
+                val readStartNs = System.nanoTime()
                 val header = readFully(input, HEADER_LEN) ?: break
                 bytes += HEADER_LEN
                 val bodySize = readU32Le(header, 0)
                 if (bodySize < 0 || bodySize > MAX_BODY) break
                 val body = readFully(input, bodySize) ?: break
                 bytes += bodySize
+                val arrivedNs = System.nanoTime()
+                maxReadUs = maxOf(maxReadUs, (arrivedNs - readStartNs) / 1_000L)
                 messages++
-                val now = System.nanoTime()
                 if (lastArrivalNs != 0L) {
-                    maxArrivalGapUs = maxOf(maxArrivalGapUs, (now - lastArrivalNs) / 1_000L)
+                    // A long gap is a static screen, not a stall.
+                    val gapUs = (arrivedNs - lastArrivalNs) / 1_000L
+                    if (gapUs < IDLE_GAP_US) maxArrivalGapUs = maxOf(maxArrivalGapUs, gapUs)
                 }
-                lastArrivalNs = now
+                lastArrivalNs = arrivedNs
                 arrivalFrames++
                 arrivalBytes += bodySize
                 onMessage(header, body)
+                maxProcessUs = maxOf(maxProcessUs, (System.nanoTime() - arrivedNs) / 1_000L)
                 if (now - arrivalStatsStartNs >= ARRIVAL_STATS_WINDOW_NS) {
                     val windowMs = (now - arrivalStatsStartNs) / 1_000_000L
                     log(
                         "screen stream stats frames=$arrivalFrames bytes=$arrivalBytes " +
-                            "maxGapMs=${maxArrivalGapUs / 1_000} windowMs=$windowMs",
+                            "maxGapMs=${maxArrivalGapUs / 1_000} readMaxMs=${maxReadUs / 1_000} " +
+                            "processMaxUs=$maxProcessUs windowMs=$windowMs",
                     )
                     arrivalFrames = 0
                     arrivalBytes = 0L
                     maxArrivalGapUs = 0L
+                    maxReadUs = 0L
+                    maxProcessUs = 0L
                     arrivalStatsStartNs = now
                 }
             }
@@ -183,6 +195,7 @@ class ScreenStream(private val key: ByteArray) : Closeable {
         const val OP_VIDEO_CONFIG = 1
         const val MAX_BODY = 8 * 1024 * 1024
         const val ARRIVAL_STATS_WINDOW_NS = 5_000_000_000L
+        const val IDLE_GAP_US = 2_000_000L
     }
 }
 

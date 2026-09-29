@@ -45,6 +45,11 @@ class AndroidMediaSink(
     private val microphoneUplinks = ConcurrentHashMap<Int, MicrophoneUplink>()
     private val videoRecoveryHandlers = ConcurrentHashMap<Int, () -> Boolean>()
     private val pendingVideoCodec = ConcurrentHashMap<Int, VideoCodec>()
+    // Which screen streams the sink currently considers active. Needed so a listener installed
+    // while a stream is already running still learns about it: the host re-installs its listener
+    // when the UI is re-attached, and without a replay it never sees (110, true) and leaves the
+    // picture frozen with no indication.
+    private val activeScreenTypes = mutableSetOf<Int>()
 
     fun setSurface(type: Int, surface: Surface) {
         surfaces[type] = surface
@@ -57,6 +62,10 @@ class AndroidMediaSink(
 
     fun setScreenStreamActiveChangedListener(listener: ((Int, Boolean) -> Unit)?) {
         screenStreamActiveChanged = listener
+        if (listener == null) return
+        // Snapshot under the lock, invoke outside it: a callback may re-enter the sink.
+        val replay = synchronized(activeScreenTypes) { activeScreenTypes.toList() }
+        replay.forEach { listener.invoke(it, true) }
     }
 
     override fun onVideoRecoveryHandler(type: Int, requestKeyFrame: (() -> Boolean)?) {
@@ -82,6 +91,9 @@ class AndroidMediaSink(
             videoDecoders.remove(type)?.close()
             pendingVideoCodec.remove(type)
             videoRecoveryHandlers.remove(type)
+        }
+        synchronized(activeScreenTypes) {
+            if (active) activeScreenTypes.add(type) else activeScreenTypes.remove(type)
         }
         screenStreamActiveChanged?.invoke(type, active)
     }
@@ -166,6 +178,15 @@ private class VideoDecoder(
     private var inputRetries = 0
     private var syncSkips = 0
     private var maxOutputAgeUs = 0L
+    // Queue residence (arrival -> fed to the decoder) is measured separately from output age, so a
+    // backlog in our own queue cannot be mistaken for the decoder being slow.
+    private var maxAgeAtDequeueUs = 0L
+    private var renderedCount = 0
+    private var receivedBytes = 0L
+    private var recoveries = 0
+    private var touchLatencySumNs = 0L
+    private var maxTouchLatencyNs = 0L
+    private var touchSamples = 0
     private var maxReleaseUs = 0L
     private var slowReleases = 0
     private var lowLatencyApplied = false
@@ -186,7 +207,15 @@ private class VideoDecoder(
     }
 
     fun submit(nalus: ByteArray) {
-        queue.frame(VideoJob.Frame(nalus, System.nanoTime() / 1000))
+        receivedBytes += nalus.size
+        val now = System.nanoTime()
+        val touchLatency = TouchLatencyProbe.onFrame(now)
+        if (touchLatency >= 0) {
+            touchLatencySumNs += touchLatency
+            if (touchLatency > maxTouchLatencyNs) maxTouchLatencyNs = touchLatency
+            touchSamples++
+        }
+        queue.frame(VideoJob.Frame(nalus, now / 1000))
     }
 
     fun setSurface(surface: Surface?) {
@@ -208,6 +237,7 @@ private class VideoDecoder(
                         System.nanoTime() - lastKeyFrameRequestNs >= KEY_FRAME_REQUEST_INTERVAL_NS
                     ) {
                         lastKeyFrameRequestNs = System.nanoTime()
+                        recoveries++
                         Log.i(TAG, "video recovery key frame requested sent=${requestKeyFrame()}")
                     }
                     // Poll output independently of input arrival, including the final/static frame.
@@ -227,6 +257,10 @@ private class VideoDecoder(
                     when (val job = heldFrame ?: queue.poll(5)) {
                         is VideoJob.Config -> configureDecoder(job)
                         is VideoJob.Frame -> {
+                            maxAgeAtDequeueUs = maxOf(
+                                maxAgeAtDequeueUs,
+                                System.nanoTime() / 1000 - job.receivedNs,
+                            )
                             // Preserve the initial random access picture until a Surface exists.
                             heldFrame = if (outputSurface == null) job else null
                             if (outputSurface != null) feed(job)
@@ -443,6 +477,7 @@ private class VideoDecoder(
                         maxReleaseUs = maxOf(maxReleaseUs, releaseUs)
                         if (releaseUs >= SLOW_RELEASE_US) slowReleases++
                     }
+                    if (render) renderedCount++
                     if (render && !renderedFrameLogged) {
                         renderedFrameLogged = true
                         Log.i(TAG, "video decoder rendered first frame bytes=${info.size}")
@@ -459,7 +494,12 @@ private class VideoDecoder(
         if (now - statsStartNs < 5_000_000_000L) return
         if (inputCount + outputCount + inputRetries + syncSkips > 0) {
             val seconds = (now - statsStartNs) / 1e9
+            val touchAvgMs = if (touchSamples == 0) -1 else touchLatencySumNs / touchSamples / 1_000_000
             Log.i(TAG, "video stats inputFps=${inputCount / seconds} decodedFps=${outputCount / seconds} " +
+                "shownFps=${renderedCount / seconds} kbps=${(receivedBytes * 8 / 1000) / seconds} " +
+                "maxAgeAtDequeueMs=${maxAgeAtDequeueUs / 1000} recoveries=$recoveries " +
+                "touch2frameAvgMs=$touchAvgMs touch2frameMaxMs=${maxTouchLatencyNs / 1_000_000} " +
+                "touchSamples=$touchSamples touchSendMaxMs=${TouchLatencyProbe.maxSendNs / 1_000_000} " +
                 "inputRetries=$inputRetries syncSkips=$syncSkips queued=${queue.size} " +
                 "maxOutputAgeMs=${maxOutputAgeUs / 1000} maxReleaseMs=${maxReleaseUs / 1000} " +
                 "slowReleases=$slowReleases waitingForSync=${syncGate?.waitingForRandomAccess}")
@@ -470,6 +510,14 @@ private class VideoDecoder(
         inputRetries = 0
         syncSkips = 0
         maxOutputAgeUs = 0
+        maxAgeAtDequeueUs = 0L
+        renderedCount = 0
+        receivedBytes = 0L
+        recoveries = 0
+        touchLatencySumNs = 0L
+        maxTouchLatencyNs = 0L
+        touchSamples = 0
+        TouchLatencyProbe.maxSendNs = 0L
         maxReleaseUs = 0
         slowReleases = 0
     }
