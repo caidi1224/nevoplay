@@ -139,7 +139,7 @@
          border-radius: var(--radius-lg); }
   .cat .ic { width: 58px; height: 58px; border-radius: 17px; display: grid; place-items: center;
              background: rgba(10, 132, 255, .16); border: 1px solid rgba(10, 132, 255, .26); }
-  .cat h3 { margin: 0; font-size: 25px; font-weight: 620; letter-spacing: -.4px; }
+  .cat h3 { margin: 0; font-size: 26px; font-weight: 620; letter-spacing: -.4px; }
   .cat p { margin: 6px 0 0; font-size: 17px; color: var(--text-3); }
   .cat .chev { margin-left: auto; color: var(--text-3); font-size: 26px; }
 
@@ -261,32 +261,24 @@
 <section class="screen" id="s2">
   <div class="veil"></div>
   <div class="videofake"></div>
-  <!-- 用几条“地图道路”示意画面，不是真实截图 -->
   <div class="vdash" style="left:120px; top:300px; width:900px; height:26px; transform:rotate(-8deg);"></div>
   <div class="vdash" style="left:640px; top:180px; width:26px; height:760px; transform:rotate(6deg);"></div>
   <div class="vdash" style="left:260px; top:640px; width:1100px; height:20px; opacity:.6;"></div>
   <div class="vdash" style="left:1180px; top:420px; width:20px; height:520px; opacity:.5;"></div>
-  <div class="blob a" style="opacity:.28"></div>
+  <div class="blob a" style="opacity:.22"></div>
 
-  <div class="glass toast">
-    <span class="dot"></span> 已连接 · 无线 CarPlay
+  <!-- 画面区域零常驻控件；以下只是设计稿上的示意标注，不在应用里出现 -->
+  <div style="position:absolute; left:50%; transform:translateX(-50%); bottom:30px; width:620px; height:120px;
+              border-radius:26px; border:2px dashed rgba(255,255,255,.30);"></div>
+  <div style="position:absolute; left:50%; transform:translateX(-50%); bottom:158px; text-align:center;
+              font-size:19px; color:rgba(255,255,255,.55); line-height:1.5;">
+    （设计稿标注，应用内不显示）<br/>此区域不放任何常驻控件
   </div>
-
-  <!-- 悬浮玻璃坞：设置在左下（本 fork 的按钮位置） -->
-  <div class="glass-strong dock">
-    <div class="chip"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-      stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/>
-      <path d="M19.4 15a1.7 1.7 0 00.34 1.87l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.7 1.7 0 00-1.87-.34 1.7 1.7 0 00-1.03 1.56V21a2 2 0 11-4 0v-.09A1.7 1.7 0 008.9 19.3a1.7 1.7 0 00-1.87.34l-.06.06a2 2 0 11-2.83-2.83l.06-.06A1.7 1.7 0 004.6 15a1.7 1.7 0 00-1.56-1.03H3a2 2 0 110-4h.09A1.7 1.7 0 004.6 8.94a1.7 1.7 0 00-.34-1.87l-.06-.06a2 2 0 112.83-2.83l.06.06A1.7 1.7 0 008.96 4.6 1.7 1.7 0 0010 3.04V3a2 2 0 114 0v.09a1.7 1.7 0 001.03 1.56 1.7 1.7 0 001.87-.34l.06-.06a2 2 0 112.83 2.83l-.06.06A1.7 1.7 0 0019.4 8.94v.12a1.7 1.7 0 001.56 1.03H21a2 2 0 110 4h-.09a1.7 1.7 0 00-1.51 1.03z"/>
-      </svg>设置</div>
-    <div class="chip"><span class="dot off"></span>断开</div>
-    <div class="chip"><span class="dot"></span>25 fps · HEVC</div>
+  <div style="position:absolute; left:46px; bottom:46px; padding:14px 24px; border-radius:999px;
+              border:2px dashed rgba(255,255,255,.30); font-size:19px;
+              color:rgba(255,255,255,.55);">
+    （设计稿标注）三指下滑 &rarr; 打开设置
   </div>
-
-  <div class="livechip glass">
-    <span class="dot"></span>触摸→画面 42ms
-  </div>
-
-  <!-- 注意：这里没有版本角标 —— 画面出现后它被覆盖（本次已实现） -->
 </section>
 
 <!-- ============================ 3. 设置：分类 ============================ -->
@@ -315,42 +307,42 @@
       <div class="glass cat"><div class="ic">
         <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#7fb0ff" stroke-width="2"
              stroke-linecap="round"><path d="M4 10a12 12 0 0116 0M7 13.5a8 8 0 0110 0"/><circle cx="12" cy="18" r="1.6" fill="#7fb0ff"/></svg>
-      </div><div><h3>连接</h3><p>无线 CarPlay、热点状态</p></div><div class="chev">›</div></div>
+      </div><div><h3>连接</h3></div><div class="chev">›</div></div>
 
       <div class="glass cat"><div class="ic">
         <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#7fb0ff" stroke-width="2"
              stroke-linecap="round"><rect x="3" y="5" width="18" height="12" rx="2.5"/><path d="M8 20h8"/></svg>
-      </div><div><h3>显示与视频</h3><p>分辨率、缩放、帧率、HEVC</p></div><div class="chev">›</div></div>
+      </div><div><h3>显示与视频</h3></div><div class="chev">›</div></div>
 
       <div class="glass cat"><div class="ic">
         <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#7fb0ff" stroke-width="2"
              stroke-linecap="round"><path d="M11 5L6 9H3v6h3l5 4V5z"/><path d="M16 9a4 4 0 010 6"/></svg>
-      </div><div><h3>音频</h3><p>麦克风增益、音量通道</p></div><div class="chev">›</div></div>
+      </div><div><h3>音频</h3></div><div class="chev">›</div></div>
 
       <div class="glass cat"><div class="ic">
         <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#7fb0ff" stroke-width="2"
              stroke-linecap="round"><circle cx="12" cy="8.5" r="3.5"/><path d="M5 20c1.5-4 4-6 7-6s5.5 2 7 6"/></svg>
-      </div><div><h3>身份与外观</h3><p>车名、AirPlay 图标、驾驶侧</p></div><div class="chev">›</div></div>
+      </div><div><h3>身份与外观</h3></div><div class="chev">›</div></div>
 
       <div class="glass cat"><div class="ic">
         <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#7fb0ff" stroke-width="2"
              stroke-linecap="round"><rect x="3" y="4" width="18" height="14" rx="2.5"/><path d="M3 9h18"/></svg>
-      </div><div><h3>窗口</h3><p>全屏、安全区域、状态栏</p></div><div class="chev">›</div></div>
+      </div><div><h3>窗口</h3></div><div class="chev">›</div></div>
 
       <div class="glass cat"><div class="ic">
         <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#7fb0ff" stroke-width="2"
              stroke-linecap="round"><path d="M12 3v9l6 3"/><circle cx="12" cy="12" r="9"/></svg>
-      </div><div><h3>启动</h3><p>开机自启、上次配置</p></div><div class="chev">›</div></div>
+      </div><div><h3>启动</h3></div><div class="chev">›</div></div>
 
       <div class="glass cat"><div class="ic">
         <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#7fb0ff" stroke-width="2"
              stroke-linecap="round"><path d="M12 21s7-6 7-11a7 7 0 10-14 0c0 5 7 11 7 11z"/><circle cx="12" cy="10" r="2.5"/></svg>
-      </div><div><h3>定位</h3><p>向 iPhone 上报位置</p></div><div class="chev">›</div></div>
+      </div><div><h3>定位</h3></div><div class="chev">›</div></div>
 
       <div class="glass cat"><div class="ic">
         <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#7fb0ff" stroke-width="2"
              stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
-      </div><div><h3>诊断</h3><p>日志、构建号、MFi 状态</p></div><div class="chev">›</div></div>
+      </div><div><h3>诊断</h3></div><div class="chev">›</div></div>
     </div>
   </div>
 </section>
@@ -463,7 +455,7 @@
               border-radius:999px; border:1px dashed rgba(120,220,170,.55);
               background:rgba(120,220,170,.10);"></div>
   <div style="position:absolute; left:50%; transform:translateX(-50%); bottom:112px; font-size:16px;
-              color:#c9f5df; text-align:center;">建议位置：底部中央窄坞<br/>默认隐藏，底部上滑或轻触唤出</div>
+              color:#c9f5df; text-align:center;">决定：此区域零常驻控件<br/>入口只有三指下滑手势</div>
 
   <!-- 当前实现的位置（左下角按钮）需要挪动的原因 -->
   <div style="position:absolute; left:14px; bottom:14px; width:170px; height:150px;
@@ -476,7 +468,7 @@
   <!-- 隐藏态提示 -->
   <div class="glass" style="position:absolute; right:46px; top:46px; padding:14px 22px;
        border-radius:999px; font-size:17px; color:var(--text-2);">
-    画面区域：不放任何常驻控件
+    投屏中：零悬浮控件
   </div>
 </section>
 
