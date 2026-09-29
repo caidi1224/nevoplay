@@ -46,13 +46,6 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
 
       - name: Test and build debug APKs
-        # The Changan Qiyuan OpenSDK credentials are injected from repository secrets and end up in
-        # the APK's manifest meta-data. They are never committed, and they are injected ONLY for a
-        # manually dispatched run: this fork is public, so an APK carrying them must never be
-        # produced by an ordinary push. Delete the artifact as soon as it has been downloaded.
-        env:
-          CA_DEV_CLIENT_ID: ${{ github.event_name == 'workflow_dispatch' && secrets.CA_DEV_CLIENT_ID || '' }}
-          CA_DEV_CLIENT_SECRET: ${{ github.event_name == 'workflow_dispatch' && secrets.CA_DEV_CLIENT_SECRET || '' }}
         run: >-
           ./gradlew
           :shared:testDebugUnitTest
