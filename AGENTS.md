@@ -143,6 +143,33 @@ CI runs on JDK 25 with Android SDK `platforms;android-37.0`,
 `build-tools;36.0.0`, and `ndk;28.2.13676358`. The same commands work locally
 (give them a long timeout; first run downloads Gradle and the SDK pieces):
 
+### Local toolchain on this machine
+
+Installed so changes can be compiled **before** pushing - CI is slow and a
+typo otherwise costs a build and a version number:
+
+```bash
+export JAVA_HOME=/opt/homebrew/opt/openjdk@25/libexec/openjdk.jdk/Contents/Home
+export PATH="$JAVA_HOME/bin:$PATH"
+# Android SDK: ~/Library/Android/sdk (cmdline-tools, platform-tools,
+# platforms;android-37.0, build-tools;36.0.0, ndk;28.2.13676358)
+# local.properties points at it and is gitignored - never commit it.
+```
+
+Fast check while editing (about a minute after the first run, which downloads
+Gradle 9.5 and the dependencies):
+
+```bash
+./gradlew :shared:compileDebugKotlin :common:compileDebugKotlin
+```
+
+Full debug APK, including the JNI/NDK path and packaging:
+
+```bash
+./gradlew :mobile:assembleDebug   # -> mobile/build/outputs/apk/debug/
+```
+
+
 ```bash
 # what CI runs for every push (dev)
 ./gradlew \
