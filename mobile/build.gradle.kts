@@ -13,8 +13,9 @@ android {
         applicationId = "com.shilapi.xcertplay"
         minSdk = 28
         targetSdk = 37
-        versionCode = 1301
-        versionName = "1.3.1"
+        // 单一来源见 gradle/libs.versions.toml，避免两个模块的版本号不同步。
+        versionCode = libs.versions.xcertplayVersionCode.get().toInt()
+        versionName = libs.versions.xcertplayVersionName.get()
 
     }
 

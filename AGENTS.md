@@ -116,6 +116,27 @@ A release is a version-bump commit plus a tag. The tag drives
 attaches them to the tag's GitHub release. Never commit APKs or signing
 material by hand.
 
+### Version bumps (mandatory)
+
+Upstream's version is the first three parts (`1.3.1`). **Every change delivered
+from this fork appends a fourth part and increments it**: `1.3.1.1`,
+`1.3.1.2`, and so on. Never reuse a value that has already been built, and
+re-sync the base whenever upstream is merged (a merge to `1.3.2` restarts at
+`1.3.2.1`).
+
+Both numbers live in one place, `gradle/libs.versions.toml`:
+
+```toml
+xcertplayVersionName = "1.3.1.1"   # <upstream>.<n>
+xcertplayVersionCode = "130101"    # <1301> * 100 + n, always increasing
+```
+
+`mobile` and `automotive` read them from the version catalog, so the two
+modules cannot drift apart. Every build also carries
+`BuildConfig.BUILD_ID` (`<commit>[+run<id>]`), which is written into the first
+line of the session log and shown in Settings → Diagnostics — that is how a log
+is matched to the APK that produced it.
+
 ## Build, test, and lint
 
 CI runs on JDK 25 with Android SDK `platforms;android-37.0`,
@@ -173,4 +194,6 @@ falls back to:
 - **所有更新都必须单独提交一个 commit**，一个逻辑改动一个 commit，交付时不留未提交的改动，确保任何一处改动都能单独回滚。
 - 已推送的历史（尤其 `master`）**不得强推、amend、rebase**；要撤销已推送的改动请用 `git revert <sha>` 生成一个新的可回滚 commit。只有尚未推送的本地 commit 才可以用 `git reset --hard HEAD~1`。
 - 提交信息沿用现有风格：`feat:`、`fix(scope):`、`opti:`、`chore:`、`update README.md`，版本号提交直接写 `1.3.0`。
+- **每交付一个改动，版本号末尾的小版本号 +1**（`1.3.1` → `1.3.1.1` → `1.3.1.2`…），不重复使用已经构建过的值；合并上游后以新的三段版本为基准重新从 `.1` 开始。两个数字集中在 `gradle/libs.versions.toml`（`xcertplayVersionName` / `xcertplayVersionCode`），mobile 与 automotive 都从那里读取，不会各写一份。
+- 每个构建还带 `BuildConfig.BUILD_ID`（提交号 `[+run<CI运行号>]`）：写在会话日志**首行**，也显示在 设置 → 诊断 里——这是判断“车上装的是哪一版、日志出自哪一版”的依据。
 - 提交前先看 `git status`：不要提交 `build/`、APK、keystore、`local.properties`、日志等生成物或本地状态。
