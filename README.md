@@ -5,6 +5,24 @@
   <p>An Android head-unit CarPlay receiver. It supports connecting to the MFi chip through a CH341 I2C bridge or directly through the board's I2C controller, and supports both wired and wireless CarPlay connections.</p>
 </div>
 
+> [!WARNING]
+> **This repository is a personal fork, tuned for one car. Do not treat it as a release.**
+>
+> Everything here was changed to make CarPlay work on a single head unit — a **Changan Qiyuan A07**
+> running 启源OS 2.2 (Android 11), with a CH341 MFi bridge, a 2560×1600 panel and Wi-Fi P2P for
+> wireless CarPlay. That unit's behaviour is baked into the code: how it forces its own status bar,
+> how it resizes the window, how it names its P2P and hotspot interfaces, and how its MFi
+> coprocessor answers (or does not). None of it is verified anywhere else.
+>
+> **Do not install this unless you understand the risk.** It can leave you with a head unit that
+> shows no picture, will not connect, or needs a reinstall to recover, and there is no support
+> channel for it. Do not disable protections you do not understand — MFi authentication, the
+> credential guard, or the system-bar handling.
+>
+> If you want a CarPlay receiver for your own car, use the upstream project instead:
+> **<https://github.com/shilapi/xcertplay>**. This fork exists so its owner can iterate on one
+> vehicle; it is not a replacement for it. See [AGENTS.md](AGENTS.md) for how this fork is run.
+
 ## Features
 
 - CarPlay host applications for Android and Android Automotive OS.
@@ -23,7 +41,7 @@
 ## Usage
 
 1. Pair your iPhone with the head unit via Bluetooth.
-2. Before a CarPlay video stream starts, tap the Settings button in the lower-right corner. You can also swipe down with three fingers to open Settings.
+2. Before a CarPlay video stream starts, tap the Settings button in the lower-left corner. You can also swipe down with three fingers to open Settings.
 3. Make sure all the settings are configured as desired.
    To enable another entry gesture, turn on `More gestures to Settings page`. Start with one finger in the upper quarter of the left eighth of the screen, slide down along that strip, and lift in the lower quarter.
 4. Scroll to the bottom and select `Save & Reconnect`.
