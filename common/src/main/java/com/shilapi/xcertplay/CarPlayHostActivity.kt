@@ -740,8 +740,28 @@ class CarPlayHostActivity : ComponentActivity() {
         )
         stageParams.setMargins(dp(12), dp(12), dp(12), 0)
         val settingsButtonParams = FrameLayout.LayoutParams(
-            dp(56),
-            dp(56),
+            dp(80),
+            dp(80),
+            Gravity.BOTTOM or Gravity.START,
+        ).apply { setMargins(dp(16), 0, dp(16), dp(16)) }
+        // Bottom-right corner: which build this is, so a head unit in the car can be identified
+        // without pulling a log. Kept non-clickable so touches reach the video underneath.
+        val buildLabel = TextView(this).apply {
+            text = "v${BuildConfig.APP_VERSION} · ${BuildConfig.BUILD_DATE}"
+            textSize = 13f
+            setTextColor(Color.argb(190, 255, 255, 255))
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = dp(8).toFloat()
+                setColor(Color.argb(120, 0, 0, 0))
+            }
+            setPadding(dp(10), dp(4), dp(10), dp(4))
+            isClickable = false
+            isFocusable = false
+        }
+        val buildLabelParams = FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.WRAP_CONTENT,
+            FrameLayout.LayoutParams.WRAP_CONTENT,
             Gravity.BOTTOM or Gravity.END,
         ).apply { setMargins(dp(16), 0, dp(16), dp(16)) }
 
@@ -759,6 +779,7 @@ class CarPlayHostActivity : ComponentActivity() {
         root.addView(logScroll, statusParams)
         root.addView(stageStatus, stageParams)
         root.addView(settingsButton, settingsButtonParams)
+        root.addView(buildLabel, buildLabelParams)
         root.addView(
             settings,
             FrameLayout.LayoutParams(

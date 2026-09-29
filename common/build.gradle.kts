@@ -20,6 +20,13 @@ fun Project.xcertplayBuildId(): String {
     return if (runId.isEmpty()) commit else "$commit+run$runId"
 }
 
+/** Commit date of HEAD as `YYYY-MM-DD`, or `unknown` when there is no git checkout to read. */
+fun Project.xcertplayCommitDate(): String = runCatching {
+    providers.exec {
+        commandLine("git", "log", "-1", "--format=%cd", "--date=format:%Y-%m-%d")
+    }.standardOutput.asText.get().trim()
+}.getOrNull().orEmpty().ifEmpty { "unknown" }
+
 android {
     namespace = "com.shilapi.xcertplay.host"
     compileSdk {
@@ -33,6 +40,11 @@ android {
         // produced it. This value is written as the first line of every session log and shown in
         // Settings -> Diagnostics, which is what makes "which build is on the car?" answerable.
         buildConfigField("String", "BUILD_ID", "\"${project.xcertplayBuildId()}\"")
+        // Shown in the bottom-right corner of the video surface, so the head unit in the car can be
+        // identified on sight. The date is the commit's date - deterministic per commit, which keeps
+        // the configuration cache meaningful, and accurate to the day for a CI build.
+        buildConfigField("String", "APP_VERSION", "\"${libs.versions.xcertplayVersionName.get()}\"")
+        buildConfigField("String", "BUILD_DATE", "\"${project.xcertplayCommitDate()}\"")
     }
 
     compileOptions {
