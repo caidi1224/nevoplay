@@ -65,7 +65,7 @@ internal object GlassUi {
 
     /** Layout params sized by [sdp]; the shell for every fixed-size element. */
     fun sized(context: Context, widthDp: Int, heightDp: Int = widthDp): LinearLayout.LayoutParams =
-        LinearLayout.LayoutParams(ssdp(context, widthDp), ssdp(context, heightDp))
+        LinearLayout.LayoutParams(sdp(context, widthDp), sdp(context, heightDp))
 
     /** Translucent "glass" panel: soft vertical wash, hairline edge, bright top highlight. */
     fun glass(radiusDp: Int, strong: Boolean = false): GradientDrawable {
