@@ -1,5 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
 
-    <style name="Theme.Xcertplay" parent="android:Theme.Material.Light.NoActionBar" />
+    <!-- The host is a fullscreen video surface: a black window background keeps the light theme
+         from flashing through while the vehicle resizes or animates its system bars. -->
+    <style name="Theme.Xcertplay" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@android:color/black</item>
+    </style>
 </resources>

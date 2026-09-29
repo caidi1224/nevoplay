@@ -47,6 +47,7 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -270,6 +271,11 @@ class CarPlayHostActivity : ComponentActivity() {
     private var currentSurfaceTexture: SurfaceTexture? = null
     private var activeDisplaySize: DisplaySize? = null
     private var pendingDisplaySize: DisplaySize? = null
+    private var lastFullscreenRequestUptime = 0L
+    private var systemBarOverrideStrikes = 0
+
+    /** Set when the vehicle forces its own bar back right after we hid it, so we stop fighting. */
+    private var vehicleEnforcesSystemBars = false
     private var displayScaleTenths = CarPlayDisplayScale.DEFAULT_TENTHS
     private var hevcEnabled = true
     private var hevcSoftwareDecoderEnabled = false
@@ -413,6 +419,7 @@ class CarPlayHostActivity : ComponentActivity() {
         loadPersistedSettings()
         locationPermissionAvailable = hasFineLocationPermission()
         setContentView(buildContentView())
+        installSystemBarObserver()
         applyFullscreenMode()
         onBackPressedDispatcher.addCallback(
             this,
@@ -570,12 +577,12 @@ class CarPlayHostActivity : ComponentActivity() {
         }
         wirelessPermissionsReady = !wirelessEnabled || hasRequiredWirelessPermissions()
         maybeStartCarPlay()
-        applyFullscreenMode()
+        reassertFullscreenIfNeeded()
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
-        if (hasFocus) applyFullscreenMode()
+        if (hasFocus) reassertFullscreenIfNeeded()
     }
 
     override fun onStop() {
@@ -1606,6 +1613,7 @@ class CarPlayHostActivity : ComponentActivity() {
         updateHotspotStatusBlock()
         updateResolutionMenu()
         updateDebugOverlays()
+        resetVehicleSystemBarLatch()
         applyFullscreenMode()
         refreshDisplaySizeAfterLayout()
     }
@@ -2349,6 +2357,7 @@ class CarPlayHostActivity : ComponentActivity() {
                 description = "Hide the status bar",
             ) { checked ->
                 hideTopBar = checked
+                resetVehicleSystemBarLatch()
                 applyFullscreenMode()
                 refreshDisplaySizeAfterLayout()
             },
@@ -2364,6 +2373,7 @@ class CarPlayHostActivity : ComponentActivity() {
                 description = "Hide the navigation bar",
             ) { checked ->
                 hideBottomBar = checked
+                resetVehicleSystemBarLatch()
                 applyFullscreenMode()
                 refreshDisplaySizeAfterLayout()
             },
@@ -3891,23 +3901,105 @@ class CarPlayHostActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * Watches the real window insets instead of inferring the bar state from configuration changes.
+     * A head unit can show or force its own status bar without a configuration change, and can push
+     * it back while the app is asking for fullscreen; observing the insets lets the app follow
+     * whatever space is actually left (and re-handshake at that size) without guessing.
+     */
+    private fun installSystemBarObserver() {
+        ViewCompat.setOnApplyWindowInsetsListener(window.decorView) { _, insets ->
+            onSystemInsetsChanged(insets)
+            insets
+        }
+        ViewCompat.requestApplyInsets(window.decorView)
+    }
+
+    private fun onSystemInsetsChanged(insets: WindowInsetsCompat) {
+        val statusBarVisible = insets.isVisible(WindowInsetsCompat.Type.statusBars())
+        val navigationBarVisible = insets.isVisible(WindowInsetsCompat.Type.navigationBars())
+        val overridden = (hideTopBar && statusBarVisible) || (hideBottomBar && navigationBarVisible)
+        val now = android.os.SystemClock.uptimeMillis()
+        if (!overridden) {
+            // The bars are as requested (or nothing has to be hidden): the vehicle is not holding them.
+            if (vehicleEnforcesSystemBars) {
+                appendLog("System bars are ours again; fullscreen can be re-asserted")
+            }
+            systemBarOverrideStrikes = 0
+            vehicleEnforcesSystemBars = false
+        } else if (
+            lastFullscreenRequestUptime != 0L &&
+            now - lastFullscreenRequestUptime <= SYSTEM_BAR_OVERRIDE_WINDOW_MILLIS
+        ) {
+            // We asked for a hidden bar a moment ago and it is visible anyway: the vehicle forced it
+            // back. Stop re-requesting fullscreen - that fight is what made the window flicker.
+            systemBarOverrideStrikes++
+            if (systemBarOverrideStrikes >= SYSTEM_BAR_OVERRIDE_STRIKES && !vehicleEnforcesSystemBars) {
+                appendLog(
+                    "The vehicle is enforcing its own system bars; staying windowed at the size " +
+                        "they leave instead of hiding them again",
+                )
+                vehicleEnforcesSystemBars = true
+            }
+        }
+        // However the bars got here, the space they leave is the size CarPlay should run at.
+        refreshDisplaySizeAfterLayout()
+    }
+
+    /**
+     * Re-asserts fullscreen from lifecycle events that the bars themselves did not cause. While the
+     * vehicle owns the bars this is skipped: the request would be overridden immediately, which is
+     * exactly the flicker the user sees. The Settings switches reset the latch, so an explicit
+     * choice still wins.
+     */
+    private fun reassertFullscreenIfNeeded() {
+        if (vehicleEnforcesSystemBars) return
+        applyFullscreenMode()
+    }
+
+    private fun resetVehicleSystemBarLatch() {
+        vehicleEnforcesSystemBars = false
+        systemBarOverrideStrikes = 0
+        lastFullscreenRequestUptime = 0L
+    }
+
+    // statusBarColor and navigationBarColor are deprecated as of Android 15, where the system draws
+    // the bars itself; on the older head units this targets they are still the only way to colour them.
+    @Suppress("DEPRECATION")
     private fun applyFullscreenMode() {
         val hideTop = hideTopBar
         val hideBottom = hideBottomBar
+        // A fullscreen video surface must not flash the light theme while the bars animate in or out.
+        window.decorView.setBackgroundColor(Color.BLACK)
+        window.statusBarColor = Color.BLACK
+        window.navigationBarColor = Color.BLACK
         WindowCompat.setDecorFitsSystemWindows(window, !(hideTop && hideBottom))
         val controller = WindowInsetsControllerCompat(window, window.decorView)
+        // Black bars need light icons; the light theme is what made the forced status bar grey.
+        controller.isAppearanceLightStatusBars = false
+        controller.isAppearanceLightNavigationBars = false
+        var requestedHide = false
         if (hideTop) {
-            controller.hide(WindowInsetsCompat.Type.statusBars())
+            if (!vehicleEnforcesSystemBars) {
+                controller.hide(WindowInsetsCompat.Type.statusBars())
+                requestedHide = true
+            }
         } else {
             controller.show(WindowInsetsCompat.Type.statusBars())
         }
         if (hideBottom) {
-            controller.hide(WindowInsetsCompat.Type.navigationBars())
+            if (!vehicleEnforcesSystemBars) {
+                controller.hide(WindowInsetsCompat.Type.navigationBars())
+                requestedHide = true
+            }
         } else {
             controller.show(WindowInsetsCompat.Type.navigationBars())
         }
         controller.systemBarsBehavior =
             WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        if (requestedHide) {
+            lastFullscreenRequestUptime = android.os.SystemClock.uptimeMillis()
+        }
     }
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
@@ -3948,6 +4040,8 @@ class CarPlayHostActivity : ComponentActivity() {
         const val LOG_RENDER_INTERVAL_MILLIS = 100L
         const val MAX_SCREEN_LOG_LINES = 100
         const val DISPLAY_CHANGE_DEBOUNCE_MILLIS = 500L
+        const val SYSTEM_BAR_OVERRIDE_WINDOW_MILLIS = 1_500L
+        const val SYSTEM_BAR_OVERRIDE_STRIKES = 2
         const val RECONNECT_DELAY_MILLIS = 2_000L
         const val IAP_TUNNEL_RECONNECT_DELAY_MILLIS = 15_000L
         const val CONTROLLER_CLOSE_TIMEOUT_MILLIS = 4_000L
