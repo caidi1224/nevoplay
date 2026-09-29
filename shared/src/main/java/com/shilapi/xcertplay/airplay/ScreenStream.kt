@@ -44,6 +44,9 @@ class ScreenStream(private val key: ByteArray) : Closeable {
         bound.bind(InetSocketAddress(InetAddress.getByName("::"), 0))
         server = bound
         thread = Thread({ accept(bound) }, "airplay-screen").apply { isDaemon = true; start() }
+        // Without this the log could not tell "the phone never connected" from "it connected and sent
+        // nothing", which is the first thing a missing picture needs to be narrowed down to.
+        Log.i(TAG, "screen stream listening address=:: port=${bound.localPort}")
         return bound.localPort
     }
 
@@ -58,6 +61,7 @@ class ScreenStream(private val key: ByteArray) : Closeable {
         try {
             val accepted = bound.accept()
             socket = accepted
+            Log.i(TAG, "screen stream connection from ${accepted.remoteSocketAddress}")
             run(accepted)
         } catch (error: Exception) {
             if (!closed.get()) listener.onClosed(error)
@@ -66,13 +70,18 @@ class ScreenStream(private val key: ByteArray) : Closeable {
 
     private fun run(sock: Socket) {
         var failure: Throwable? = null
+        var bytes = 0L
+        var messages = 0
         try {
             val input = sock.getInputStream()
             while (!closed.get()) {
                 val header = readFully(input, HEADER_LEN) ?: break
+                bytes += HEADER_LEN
                 val bodySize = readU32Le(header, 0)
                 if (bodySize < 0 || bodySize > MAX_BODY) break
                 val body = readFully(input, bodySize) ?: break
+                bytes += bodySize
+                messages++
                 onMessage(header, body)
             }
         } catch (error: Exception) {
@@ -80,6 +89,8 @@ class ScreenStream(private val key: ByteArray) : Closeable {
         } finally {
             if (socket === sock) socket = null
             safeClose(sock)
+            // The byte count is what separates a silent peer from a peer that never showed up.
+            Log.i(TAG, "screen stream peer finished bytes=$bytes messages=$messages")
             if (!closed.get()) listener.onClosed(failure)
         }
     }
