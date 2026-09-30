@@ -10,8 +10,9 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.graphics.SurfaceTexture
-import android.graphics.Typeface
+import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.StateListDrawable
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -20,7 +21,6 @@ import android.os.Process
 import android.provider.Settings
 import android.text.Editable
 import android.text.InputType
-import android.text.TextUtils
 import android.text.TextWatcher
 import android.util.Log
 import android.util.TypedValue
@@ -30,18 +30,14 @@ import android.view.Surface
 import android.view.TextureView
 import android.view.View
 import android.view.ViewGroup
-import android.widget.Button
 import android.widget.EditText
 import android.widget.FrameLayout
-import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.RadioButton
 import android.widget.RadioGroup
 import android.widget.ProgressBar
 import android.widget.ScrollView
-import android.widget.SeekBar
-import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -83,6 +79,12 @@ import com.shilapi.xcertplay.orchestration.isManualHotspotChannelCompatible
 import com.shilapi.xcertplay.transport.Iap2IdentificationConfig
 import com.shilapi.xcertplay.transport.Iap2LocationProvider
 import com.shilapi.xcertplay.transport.UsbDeviceId
+import com.shilapi.xcertplay.ui.HostBlock
+import com.shilapi.xcertplay.ui.HostSlider
+import com.shilapi.xcertplay.ui.HostToggle
+import com.shilapi.xcertplay.ui.HostUi
+import com.shilapi.xcertplay.ui.applyHostScale
+import com.shilapi.xcertplay.ui.hostRow
 import com.shilapi.xcertplay.host.BuildConfig
 import java.io.File
 import java.text.SimpleDateFormat
@@ -232,8 +234,15 @@ class CarPlayHostActivity : ComponentActivity() {
 
     private var videoView: TextureView? = null
     private var gestureOverlay: View? = null
-    private var disconnectedSettingsButton: View? = null
+    private var idlePanel: View? = null
+    private var idleTransportValue: TextView? = null
+    private var idleHotspotValue: TextView? = null
+    private var idleMfiValue: TextView? = null
+    private var idleLogToggle: HostToggle? = null
     private var settingsMenu: View? = null
+
+    /** The category block the settings column is currently filling; see [buildSettingsMenu]. */
+    private var settingsBlock: HostBlock? = null
     private var mfiTargetGroup: RadioGroup? = null
     private var mfiI2cFields: View? = null
     private var mfiRemoteFields: View? = null
@@ -242,10 +251,10 @@ class CarPlayHostActivity : ComponentActivity() {
     private var remoteMfiServerInput: EditText? = null
     private var remoteMfiTokenInput: EditText? = null
     private var settingsBaseline: SettingsBaseline? = null
-    private var locationReportingSwitch: Switch? = null
-    private var microphoneGainSeekBar: SeekBar? = null
+    private var locationReportingSwitch: HostToggle? = null
+    private var microphoneGainSeekBar: HostSlider? = null
     private var microphoneGainValueView: TextView? = null
-    private var microphoneTestButton: Button? = null
+    private var microphoneTestButton: TextView? = null
     private var microphoneLevelBar: ProgressBar? = null
     private var microphoneLevelValueView: TextView? = null
     private var microphoneLevelMonitor: MicrophoneLevelMonitor? = null
@@ -685,17 +694,22 @@ class CarPlayHostActivity : ComponentActivity() {
             setOnTouchListener { view, event -> onHostTouch(view, event) }
         }
         val log = TextView(this).apply {
-            setTextColor(Color.WHITE)
-            setPadding(dp(12), dp(8), dp(12), dp(8))
-            textSize = 11f
-            typeface = Typeface.MONOSPACE
+            setTextColor(HostUi.TEXT)
+            setPadding(dp(20), dp(16), dp(20), dp(16))
+            textSize = 15f
+            typeface = HostUi.mono()
             text = ""
         }
         val logScroll = object : ScrollView(this) {
             override fun onInterceptTouchEvent(event: MotionEvent): Boolean = false
             override fun onTouchEvent(event: MotionEvent): Boolean = false
         }.apply {
-            setBackgroundColor(Color.argb(150, 0, 0, 0))
+            background = HostUi.rounded(
+                this@CarPlayHostActivity,
+                10,
+                Color.argb(0xE8, 0x10, 0x13, 0x14),
+                HostUi.LINE,
+            )
             isFillViewport = false
             isFocusable = false
             addView(
@@ -707,62 +721,39 @@ class CarPlayHostActivity : ComponentActivity() {
             )
             addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> scrollLogsToBottom() }
         }
+        // One piece of large type per screen: the current stage. It is only on screen while no
+        // video stream is active, so the CarPlay picture never competes with it.
         val stageStatus = TextView(this).apply {
-            setTextColor(Color.WHITE)
-            textSize = 13f
-            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(HostUi.TEXT)
+            textSize = 64f
+            typeface = HostUi.monoBold()
             includeFontPadding = false
-            isSingleLine = true
-            ellipsize = TextUtils.TruncateAt.END
+            letterSpacing = -0.02f
             maxWidth = (resources.displayMetrics.widthPixels * 0.78f).toInt()
-            setPadding(dp(14), dp(8), dp(14), dp(8))
             text = latestStage
-            background = GradientDrawable().apply {
-                shape = GradientDrawable.RECTANGLE
-                cornerRadius = dp(10).toFloat()
-                setColor(Color.argb(170, 0, 0, 0))
-            }
         }
-        val settingsButton = ImageButton(this).apply {
-            setImageResource(R.drawable.ic_settings)
-            imageTintList = ColorStateList.valueOf(Color.rgb(0xA6, 0x7D, 0xF2))
-            background = GradientDrawable().apply {
-                shape = GradientDrawable.OVAL
-                setColor(Color.rgb(0xE3, 0xE3, 0xE4))
-            }
-            setPadding(dp(14), dp(14), dp(14), dp(14))
-            contentDescription = "Open settings"
-            setOnClickListener { openSettingsMenu() }
-        }
+        val idle = buildIdlePanel(stageStatus).apply { visibility = View.GONE }
         val statusParams = FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.MATCH_PARENT,
             FrameLayout.LayoutParams.WRAP_CONTENT,
             Gravity.BOTTOM or Gravity.START,
         )
-        statusParams.setMargins(dp(12), 0, dp(12), dp(12))
-        val stageParams = FrameLayout.LayoutParams(
+        statusParams.setMargins(dp(48), 0, dp(48), dp(40))
+        val idleParams = FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT,
             FrameLayout.LayoutParams.WRAP_CONTENT,
-            FrameLayout.LayoutParams.WRAP_CONTENT,
-            Gravity.TOP or Gravity.END,
-        )
-        stageParams.setMargins(dp(12), dp(12), dp(12), 0)
-        val settingsButtonParams = FrameLayout.LayoutParams(
-            dp(80),
-            dp(80),
-            Gravity.BOTTOM or Gravity.START,
-        ).apply { setMargins(dp(16), 0, dp(16), dp(16)) }
+            Gravity.TOP or Gravity.START,
+        ).apply {
+            val side = panelEdgePadding()
+            setMargins(side, (side * 0.9f).toInt(), side, 0)
+        }
         // Bottom-right corner: which build this is, so a head unit in the car can be identified
         // without pulling a log. Kept non-clickable so touches reach the video underneath.
         val buildLabel = TextView(this).apply {
             text = "v${BuildConfig.APP_VERSION} · ${BuildConfig.BUILD_DATE}"
-            textSize = 13f
-            setTextColor(Color.argb(190, 255, 255, 255))
-            background = GradientDrawable().apply {
-                shape = GradientDrawable.RECTANGLE
-                cornerRadius = dp(8).toFloat()
-                setColor(Color.argb(120, 0, 0, 0))
-            }
-            setPadding(dp(10), dp(4), dp(10), dp(4))
+            textSize = 16f
+            typeface = HostUi.mono()
+            setTextColor(HostUi.FAINT)
             isClickable = false
             isFocusable = false
         }
@@ -770,7 +761,7 @@ class CarPlayHostActivity : ComponentActivity() {
             FrameLayout.LayoutParams.WRAP_CONTENT,
             FrameLayout.LayoutParams.WRAP_CONTENT,
             Gravity.BOTTOM or Gravity.END,
-        ).apply { setMargins(dp(16), 0, dp(16), dp(16)) }
+        ).apply { setMargins(dp(48), 0, dp(48), dp(40)) }
 
         val settings = buildSettingsMenu().apply { visibility = View.GONE }
         val editor = buildSafeAreaEditor().apply { visibility = View.GONE }
@@ -784,8 +775,7 @@ class CarPlayHostActivity : ComponentActivity() {
             ),
         )
         root.addView(logScroll, statusParams)
-        root.addView(stageStatus, stageParams)
-        root.addView(settingsButton, settingsButtonParams)
+        root.addView(idle, idleParams)
         root.addView(buildLabel, buildLabelParams)
         buildLabelView = buildLabel
         root.addView(
@@ -804,7 +794,7 @@ class CarPlayHostActivity : ComponentActivity() {
         )
         videoView = video
         gestureOverlay = gestureLayer
-        disconnectedSettingsButton = settingsButton
+        idlePanel = idle
         settingsMenu = settings
         safeAreaEditor = editor
         statusView = log
@@ -812,6 +802,178 @@ class CarPlayHostActivity : ComponentActivity() {
         stageStatusView = stageStatus
         updateDebugOverlays()
         return root
+    }
+
+    /**
+     * The screen shown until CarPlay paints something: the wordmark, the current stage as the one
+     * piece of large type, and two terminal blocks - what can be done here, and what the host is
+     * doing right now. It replaces the old floating settings button, so once a video stream starts
+     * there is nothing left on the picture at all.
+     */
+    private fun buildIdlePanel(stage: TextView): View {
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+        }
+        root.addView(
+            LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                addView(
+                    menuText("\u276f", 30f, MENU_ACCENT, bold = true),
+                    LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginEnd = dp(16) },
+                )
+                addView(
+                    menuText("xcertplay", 30f, MENU_LABEL, bold = true),
+                    LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT),
+                )
+                addView(
+                    menuText("head unit", 22f, MENU_FAINT),
+                    LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart = dp(18) },
+                )
+            },
+            LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT),
+        )
+        root.addView(
+            stage,
+            LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(26) },
+        )
+
+        val commands = HostBlock(this, "commands").apply {
+            addRow(
+                idleCommandRow(
+                    title = "Settings",
+                    hint = "Transport, resolution, frame rate, MFi channel",
+                ) { openSettingsMenu() },
+            )
+            addRow(idleLogRow())
+        }
+
+        idleTransportValue = menuText("", 21f, HostUi.TEXT)
+        idleHotspotValue = menuText("", 21f, HostUi.TEXT)
+        idleMfiValue = menuText("", 21f, HostUi.TEXT)
+        val status = HostBlock(this, "status").apply {
+            addRow(idleStatusRow("transport", requireNotNull(idleTransportValue)))
+            addRow(idleStatusRow("hotspot", requireNotNull(idleHotspotValue)))
+            addRow(idleStatusRow("mfi target", requireNotNull(idleMfiValue)))
+            addRow(idleStatusRow("build", menuText("v${BuildConfig.APP_VERSION}", 21f, HostUi.TEXT)))
+        }
+
+        // Two columns whenever the panel is wide enough - every head unit - and one column on a
+        // phone, where two blocks of monospace side by side would leave neither readable.
+        val wide = resources.displayMetrics.widthPixels >= IDLE_PANEL_SIDE_BY_SIDE_PX
+        val blocks = LinearLayout(this).apply {
+            orientation = if (wide) LinearLayout.HORIZONTAL else LinearLayout.VERTICAL
+        }
+        if (wide) {
+            blocks.addView(
+                commands,
+                LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.15f),
+            )
+            blocks.addView(
+                status,
+                LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = dp(24) },
+            )
+        } else {
+            blocks.addView(commands, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+            blocks.addView(
+                status,
+                LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(20) },
+            )
+        }
+        root.addView(
+            blocks,
+            LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(40) },
+        )
+
+        root.applyHostScale(homeTextScale(), homeSpaceScale())
+        // The single piece of display type follows the panel, not the font scale: at 64sp a phone
+        // held in landscape would give a quarter of its height to one line.
+        stage.setTextSize(
+            TypedValue.COMPLEX_UNIT_PX,
+            minOf(
+                stage.textSize,
+                resources.displayMetrics.heightPixels * IDLE_TITLE_HEIGHT_FRACTION,
+                resources.displayMetrics.widthPixels * IDLE_TITLE_WIDTH_FRACTION,
+            ),
+        )
+        updateIdlePanel()
+        return root
+    }
+
+    /** One action on the idle screen: prompt, name, hint, and a chip that the row itself handles. */
+    private fun idleCommandRow(title: String, hint: String, onClick: () -> Unit): View =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            isClickable = true
+            isFocusable = true
+            setOnClickListener { onClick() }
+            addView(
+                LinearLayout(this@CarPlayHostActivity).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    addView(
+                        menuText("\u276f", 24f, MENU_ACCENT, bold = true),
+                        LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginEnd = dp(14) },
+                    )
+                    addView(
+                        menuText(title, 26f, MENU_LABEL),
+                        LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
+                    )
+                    addView(
+                        HostUi.chip(this@CarPlayHostActivity, "Open").apply {
+                            isClickable = false
+                            isFocusable = false
+                        },
+                        LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT),
+                    )
+                },
+                LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT),
+            )
+            addView(
+                menuText(hint, 18f, MENU_SECONDARY).apply { setPadding(dp(38), dp(8), 0, 0) },
+                LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT),
+            )
+        }
+
+    /** The on-screen log switch, same setting as the one in Diagnostics. */
+    private fun idleLogRow(): View =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(
+                menuText("On-screen log", 26f, MENU_LABEL),
+                LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
+            )
+            val toggle = HostToggle(this@CarPlayHostActivity).apply {
+                isChecked = debugLogsEnabled
+                contentDescription = "Show on-screen debug logs"
+                setOnCheckedChangeListener { _, checked ->
+                    debugLogsEnabled = checked
+                    if (!checked) clearScreenLogs()
+                    appendLog("Debug logs ${if (checked) "enabled" else "disabled"}")
+                    updateDebugOverlays()
+                }
+            }
+            idleLogToggle = toggle
+            addView(toggle, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        }
+
+    private fun idleStatusRow(key: String, value: TextView): View =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(
+                menuText(key, 20f, MENU_FAINT),
+                LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 0.42f),
+            )
+            addView(value, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 0.58f))
+        }
+
+    private fun updateIdlePanel() {
+        idleTransportValue?.text = if (wirelessEnabled) "wireless" else "usb"
+        idleHotspotValue?.text = if (wirelessEnabled) hotspotStatus.state else "off"
+        idleMfiValue?.text = mfiTargetLabel(mfiTarget).lowercase()
+        idleLogToggle?.setCheckedQuietly(debugLogsEnabled)
     }
 
     private fun buildSettingsMenu(): View {
@@ -822,14 +984,56 @@ class CarPlayHostActivity : ComponentActivity() {
         val panel = FrameLayout(this).apply {
             setBackgroundColor(MENU_BACKGROUND)
         }
-        val content = LinearLayout(this).apply {
+        // One child list, two jobs: category blocks and the tagged footer stay in the column (the
+        // landscape splitter walks exactly these), while everything else lands inside the block the
+        // last category opened. Rows therefore keep no margins of their own - the block separates
+        // them with a hairline instead.
+        val content = object : LinearLayout(this) {
+            override fun addView(child: View?, index: Int, params: ViewGroup.LayoutParams?) {
+                val view = child ?: return
+                val block = settingsBlock
+                if (block != null && view.tag != MENU_FOOTER_TAG && view !is HostBlock) {
+                    block.addRow(view)
+                } else {
+                    super.addView(view, index, params)
+                }
+            }
+
+            override fun removeAllViews() {
+                settingsBlock = null
+                super.removeAllViews()
+            }
+        }.apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
-            setPadding(dp(48), dp(36), dp(48), dp(36))
+            val side = panelEdgePadding()
+            setPadding(side, (side * 0.75f).toInt(), side, side)
         }
         content.addView(
-            menuText("CarPlay settings", 32f, Color.WHITE, bold = true).apply {
-                setPadding(dp(56), 0, 0, 0)
+            LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                addView(
+                    menuText("❯", 30f, MENU_ACCENT, bold = true),
+                    LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.WRAP_CONTENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ).apply { marginEnd = dp(16) },
+                )
+                addView(
+                    menuText("Settings", 32f, MENU_LABEL, bold = true),
+                    LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.WRAP_CONTENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ),
+                )
+                addView(
+                    menuText("xcertplay", 22f, MENU_FAINT),
+                    LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.WRAP_CONTENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ).apply { marginStart = dp(18) },
+                )
             },
             LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
@@ -857,21 +1061,12 @@ class CarPlayHostActivity : ComponentActivity() {
             gravity = Gravity.CENTER_VERTICAL
         }
         wirelessRow.addView(
-            menuText("Wireless CarPlay", 20f, MENU_SECONDARY),
+            menuText("Wireless CarPlay", 20f, MENU_LABEL),
             LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
         )
-        val wirelessSwitch = Switch(this).apply {
+        val wirelessSwitch = HostToggle(this).apply {
             isChecked = wirelessEnabled
             contentDescription = "Wireless CarPlay transport"
-            showText = false
-            thumbTintList = ColorStateList(
-                arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
-                intArrayOf(MENU_ACCENT, MENU_SECONDARY),
-            )
-            trackTintList = ColorStateList(
-                arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
-                intArrayOf(MENU_ACCENT_TRACK, MENU_TRACK_OFF),
-            )
             setOnCheckedChangeListener { _, checked ->
                 if (wirelessEnabled == checked) return@setOnCheckedChangeListener
                 wirelessEnabled = checked
@@ -908,7 +1103,7 @@ class CarPlayHostActivity : ComponentActivity() {
         )
 
         content.addView(
-            menuText("Hotspot status", 20f, MENU_SECONDARY),
+            menuText("Hotspot status", 20f, MENU_LABEL),
             LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT,
@@ -1036,7 +1231,7 @@ class CarPlayHostActivity : ComponentActivity() {
             gravity = Gravity.CENTER_VERTICAL
         }
         resolutionHeader.addView(
-            menuText("Resolution", 20f, MENU_SECONDARY),
+            menuText("Resolution", 20f, MENU_LABEL),
             LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
         )
         val resolutionValue = menuText(
@@ -1060,23 +1255,20 @@ class CarPlayHostActivity : ComponentActivity() {
             ).apply { topMargin = dp(14) },
         )
 
-        val seekBar = SeekBar(this).apply {
+        val seekBar = HostSlider(this).apply {
             max = CarPlayDisplayScale.MAX_TENTHS - CarPlayDisplayScale.MIN_TENTHS
             progress = displayScaleTenths - CarPlayDisplayScale.MIN_TENTHS
-            splitTrack = false
-            progressTintList = ColorStateList.valueOf(MENU_ACCENT)
-            thumbTintList = ColorStateList.valueOf(MENU_ACCENT)
-            setOnSeekBarChangeListener(
-                object : SeekBar.OnSeekBarChangeListener {
-                    override fun onProgressChanged(seekBar: SeekBar, progress: Int, fromUser: Boolean) {
+            setOnChangeListener(
+                object : HostSlider.OnChangeListener {
+                    override fun onProgressChanged(slider: HostSlider, progress: Int, fromUser: Boolean) {
                         displayScaleTenths = CarPlayDisplayScale.sanitize(
                             CarPlayDisplayScale.MIN_TENTHS + progress,
                         )
                         updateResolutionMenu()
                     }
 
-                    override fun onStartTrackingTouch(seekBar: SeekBar) = Unit
-                    override fun onStopTrackingTouch(seekBar: SeekBar) = Unit
+                    override fun onStartTrackingTouch(slider: HostSlider) = Unit
+                    override fun onStopTrackingTouch(slider: HostSlider) = Unit
                 },
             )
         }
@@ -1174,21 +1366,12 @@ class CarPlayHostActivity : ComponentActivity() {
             gravity = Gravity.CENTER_VERTICAL
         }
         hevcRow.addView(
-            menuText("HEVC (H.265)", 20f, MENU_SECONDARY),
+            menuText("HEVC (H.265)", 20f, MENU_LABEL),
             LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
         )
-        val hevcSwitch = Switch(this).apply {
+        val hevcSwitch = HostToggle(this).apply {
             isChecked = hevcEnabled
             contentDescription = "HEVC H.265 video transport"
-            showText = false
-            thumbTintList = ColorStateList(
-                arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
-                intArrayOf(MENU_ACCENT, MENU_SECONDARY),
-            )
-            trackTintList = ColorStateList(
-                arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
-                intArrayOf(MENU_ACCENT_TRACK, MENU_TRACK_OFF),
-            )
             setOnCheckedChangeListener { _, checked ->
                 if (hevcEnabled == checked) return@setOnCheckedChangeListener
                 hevcEnabled = checked
@@ -1219,21 +1402,12 @@ class CarPlayHostActivity : ComponentActivity() {
             gravity = Gravity.CENTER_VERTICAL
         }
         softwareHevcRow.addView(
-            menuText("HEVC software decoder", 20f, MENU_SECONDARY),
+            menuText("HEVC software decoder", 20f, MENU_LABEL),
             LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
         )
-        val softwareHevcSwitch = Switch(this).apply {
+        val softwareHevcSwitch = HostToggle(this).apply {
             isChecked = hevcSoftwareDecoderEnabled
             contentDescription = "Use software HEVC decoder"
-            showText = false
-            thumbTintList = ColorStateList(
-                arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
-                intArrayOf(MENU_ACCENT, MENU_SECONDARY),
-            )
-            trackTintList = ColorStateList(
-                arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
-                intArrayOf(MENU_ACCENT_TRACK, MENU_TRACK_OFF),
-            )
             setOnCheckedChangeListener { _, checked ->
                 if (hevcSoftwareDecoderEnabled == checked) return@setOnCheckedChangeListener
                 hevcSoftwareDecoderEnabled = checked
@@ -1356,40 +1530,31 @@ class CarPlayHostActivity : ComponentActivity() {
             ).apply { topMargin = dp(30) },
         )
 
-        val save = Button(this).apply {
-            text = "Save and reconnect"
-            isAllCaps = false
-            textSize = 17f
-            setTextColor(MENU_BUTTON_TEXT)
-            backgroundTintList = ColorStateList.valueOf(MENU_ACCENT)
-            minHeight = dp(52)
-            tag = MENU_FOOTER_TAG
+        val save = HostUi.chip(this, "Save and reconnect", HostUi.ChipStyle.PRIMARY).apply {
             setOnClickListener { saveSettingsAndReconnect() }
         }
-        content.addView(
-            save,
-            LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-            ).apply { topMargin = dp(46) },
-        )
-
-        val exitApplicationButton = Button(this).apply {
-            text = "EXIT APPLICATION"
-            isAllCaps = false
-            textSize = 17f
-            setTextColor(Color.WHITE)
-            backgroundTintList = ColorStateList.valueOf(MENU_DANGER)
-            minHeight = dp(52)
-            tag = MENU_FOOTER_TAG
+        val exitApplicationButton = HostUi.chip(this, "Exit application", HostUi.ChipStyle.DANGER).apply {
             setOnClickListener { exitApplication() }
         }
         content.addView(
-            exitApplicationButton,
+            LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                tag = MENU_FOOTER_TAG
+                addView(
+                    save,
+                    LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
+                )
+                addView(
+                    exitApplicationButton,
+                    LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+                        marginStart = dp(12)
+                    },
+                )
+            },
             LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT,
-            ).apply { topMargin = dp(12) },
+            ).apply { topMargin = dp(32) },
         )
 
         val scroll = ScrollView(this).apply {
@@ -1410,21 +1575,17 @@ class CarPlayHostActivity : ComponentActivity() {
             ),
         )
         panel.addView(
-            Button(this).apply {
-                text = "X"
-                isAllCaps = false
-                textSize = 22f
-                setTextColor(Color.WHITE)
-                backgroundTintList = ColorStateList.valueOf(MENU_TRACK_OFF)
+            HostUi.chip(this, "✕", HostUi.ChipStyle.NORMAL).apply {
                 contentDescription = "Discard changes and exit settings"
-                minWidth = 0
-                minHeight = 0
-                setPadding(0, 0, 0, 0)
                 setOnClickListener { cancelSettingsEdits() }
             },
-            FrameLayout.LayoutParams(dp(48), dp(48), Gravity.TOP or Gravity.START).apply {
-                leftMargin = dp(16)
-                topMargin = dp(16)
+            FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                Gravity.TOP or Gravity.END,
+            ).apply {
+                rightMargin = dp(20)
+                topMargin = dp(20)
             },
         )
         overlay.addView(
@@ -1447,7 +1608,7 @@ class CarPlayHostActivity : ComponentActivity() {
         if (settingsMenuIsLandscape()) {
             splitSettingsMenuIntoColumns(content)
         }
-        scaleMenuTextSize(overlay, menuTextScale())
+        overlay.applyHostScale(menuTextScale(), menuSpaceScale())
 
         resolutionValueView = resolutionValue
         resolutionPreviewView = preview
@@ -1475,22 +1636,45 @@ class CarPlayHostActivity : ComponentActivity() {
             minOf(availableWidth, MAX_SETTINGS_MENU_WIDTH_PX)
         }
 
-    /** Text sizes are authored for a 1080p-wide panel; scale them up on larger panels. */
-    private fun menuTextScale(): Float =
-        (resources.displayMetrics.widthPixels / MENU_TEXT_SCALE_REFERENCE_WIDTH_PX)
-            .coerceIn(1f, MENU_TEXT_SCALE_MAX)
-
-    private fun scaleMenuTextSize(root: View, scale: Float) {
-        if (scale <= 1.001f) return
-        if (root is TextView) {
-            root.setTextSize(TypedValue.COMPLEX_UNIT_PX, root.textSize * scale)
-        }
-        if (root is ViewGroup) {
-            for (index in 0 until root.childCount) {
-                scaleMenuTextSize(root.getChildAt(index), scale)
-            }
-        }
+    /**
+     * One factor for the whole panel, derived from its width in dp rather than in pixels: a head
+     * unit reports a wide panel at a low density (2560px at 1.5x is 1706dp, so text grows), while a
+     * phone reports almost the same pixel width at 3.5x (754dp, so text stays put). Text, padding,
+     * margins and fixed sizes all scale by this one factor, which is what keeps the layout
+     * proportional on a resolution it was never authored for.
+     */
+    /**
+     * The page margin: 72dp on a head unit, but only a phone's worth on a 350dp-wide panel, where a
+     * fixed 72dp would spend a fifth of the width on nothing.
+     */
+    private fun panelEdgePadding(): Int {
+        val widthDp = panelWidthDp(resources.displayMetrics.widthPixels)
+        return (widthDp * PANEL_EDGE_FRACTION).toInt().coerceIn(dp(16), dp(72))
     }
+
+    private fun panelWidthDp(panelWidthPx: Int): Float =
+        panelWidthPx / resources.displayMetrics.density
+
+    private fun hostTextScale(panelWidthPx: Int): Float =
+        (panelWidthDp(panelWidthPx) / HostUi.REFERENCE_WIDTH_DP)
+            .coerceIn(HostUi.MIN_TEXT_SCALE, HostUi.MAX_TEXT_SCALE)
+
+    private fun hostSpaceScale(panelWidthPx: Int): Float =
+        (panelWidthDp(panelWidthPx) / HostUi.REFERENCE_WIDTH_DP)
+            .coerceIn(HostUi.MIN_SPACE_SCALE, HostUi.MAX_SPACE_SCALE)
+
+    /** The settings column is capped, so its own width is what the panel scales against. */
+    private fun menuTextScale(): Float =
+        hostTextScale(settingsPanelWidth(resources.displayMetrics.widthPixels))
+
+    private fun menuSpaceScale(): Float =
+        hostSpaceScale(settingsPanelWidth(resources.displayMetrics.widthPixels))
+
+    private fun homeTextScale(): Float =
+        hostTextScale(resources.displayMetrics.widthPixels)
+
+    private fun homeSpaceScale(): Float =
+        hostSpaceScale(resources.displayMetrics.widthPixels)
 
     /**
      * Re-flow the rows that [buildSettingsMenu] appended as one column into two balanced columns,
@@ -1861,8 +2045,46 @@ class CarPlayHostActivity : ComponentActivity() {
         return section
     }
 
-    private fun settingsCategoryHeader(title: String): TextView =
-        menuText(title, 16f, MENU_ACCENT, bold = true).apply { tag = MENU_CATEGORY_TAG }
+    /**
+     * Opens a category block. The rows added to the settings column after this call land inside it
+     * until the next category opens; see the redirecting container in [buildSettingsMenu].
+     */
+    private fun settingsCategoryHeader(title: String): HostBlock =
+        HostBlock(this, title).apply {
+            tag = MENU_CATEGORY_TAG
+            settingsBlock = this
+        }
+
+    /**
+     * A radio button as a terminal chip: no circle, a bordered box that fills in when selected.
+     * Keeping RadioButton and RadioGroup means every existing check-and-sync path keeps working.
+     */
+    private fun styleChoiceButton(button: RadioButton) {
+        button.typeface = HostUi.mono()
+        button.textSize = 19f
+        button.isAllCaps = false
+        button.gravity = Gravity.CENTER
+        button.includeFontPadding = false
+        button.setButtonDrawable(null as Drawable?)
+        button.buttonTintList = null
+        button.setPadding(dp(20), dp(14), dp(20), dp(14))
+        button.setTextColor(
+            ColorStateList(
+                arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
+                intArrayOf(HostUi.ACCENT, HostUi.DIM),
+            ),
+        )
+        button.background = StateListDrawable().apply {
+            addState(
+                intArrayOf(android.R.attr.state_checked),
+                HostUi.rounded(this@CarPlayHostActivity, 8, HostUi.ACCENT_WASH, HostUi.ACCENT_DIM),
+            )
+            addState(
+                intArrayOf(),
+                HostUi.rounded(this@CarPlayHostActivity, 8, HostUi.SURFACE_2, HostUi.LINE_2),
+            )
+        }
+    }
 
     private fun buildLocationReportingSection(): View =
         LinearLayout(this).apply {
@@ -1872,21 +2094,12 @@ class CarPlayHostActivity : ComponentActivity() {
                 gravity = Gravity.CENTER_VERTICAL
             }
             row.addView(
-                menuText("Report location to iPhone", 20f, MENU_SECONDARY),
+                menuText("Report location to iPhone", 20f, MENU_LABEL),
                 LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
             )
-            val switch = Switch(this@CarPlayHostActivity).apply {
+            val switch = HostToggle(this@CarPlayHostActivity).apply {
                 isChecked = locationReportingEnabled
                 contentDescription = "Report Android location to the iPhone"
-                showText = false
-                thumbTintList = ColorStateList(
-                    arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
-                    intArrayOf(MENU_ACCENT, MENU_SECONDARY),
-                )
-                trackTintList = ColorStateList(
-                    arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
-                    intArrayOf(MENU_ACCENT_TRACK, MENU_TRACK_OFF),
-                )
                 setOnCheckedChangeListener { _, checked ->
                     onLocationReportingChanged(checked)
                 }
@@ -1953,7 +2166,7 @@ class CarPlayHostActivity : ComponentActivity() {
             gravity = Gravity.CENTER_VERTICAL
         }
         header.addView(
-            menuText("Microphone gain (0.8x–2.0x)", 20f, MENU_SECONDARY),
+            menuText("Microphone gain (0.8x–2.0x)", 20f, MENU_LABEL),
             LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
         )
         val gainValue = menuText(
@@ -1982,19 +2195,16 @@ class CarPlayHostActivity : ComponentActivity() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        val gainSlider = SeekBar(this).apply {
+        val gainSlider = HostSlider(this).apply {
             max = (MicrophoneGain.MAX_PERCENT - MicrophoneGain.MIN_PERCENT) /
                 MicrophoneGain.STEP_PERCENT
             progress = (microphoneGainPercent - MicrophoneGain.MIN_PERCENT) /
                 MicrophoneGain.STEP_PERCENT
-            splitTrack = false
-            progressTintList = ColorStateList.valueOf(MENU_ACCENT)
-            thumbTintList = ColorStateList.valueOf(MENU_ACCENT)
             contentDescription = "Microphone gain"
-            setOnSeekBarChangeListener(
-                object : SeekBar.OnSeekBarChangeListener {
+            setOnChangeListener(
+                object : HostSlider.OnChangeListener {
                     override fun onProgressChanged(
-                        seekBar: SeekBar,
+                        slider: HostSlider,
                         progress: Int,
                         fromUser: Boolean,
                     ) {
@@ -2006,8 +2216,8 @@ class CarPlayHostActivity : ComponentActivity() {
                         microphoneGainValueView?.text = microphoneGainLabel(percent)
                     }
 
-                    override fun onStartTrackingTouch(seekBar: SeekBar) = Unit
-                    override fun onStopTrackingTouch(seekBar: SeekBar) = Unit
+                    override fun onStartTrackingTouch(slider: HostSlider) = Unit
+                    override fun onStopTrackingTouch(slider: HostSlider) = Unit
                 },
             )
         }
@@ -2016,13 +2226,7 @@ class CarPlayHostActivity : ComponentActivity() {
             gainSlider,
             LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
         )
-        val testButton = Button(this).apply {
-            text = "Test"
-            isAllCaps = false
-            textSize = 16f
-            setTextColor(MENU_BUTTON_TEXT)
-            backgroundTintList = ColorStateList.valueOf(MENU_ACCENT)
-            minWidth = dp(78)
+        val testButton = HostUi.chip(this, "Test", HostUi.ChipStyle.PRIMARY).apply {
             contentDescription = "Test microphone level"
             setOnClickListener {
                 if (microphoneLevelMonitor?.isRunning == true) {
@@ -2079,7 +2283,6 @@ class CarPlayHostActivity : ComponentActivity() {
         ).apply {
             max = 100
             progress = 0
-            progressTintList = ColorStateList.valueOf(MENU_ACCENT)
             progressBackgroundTintList = ColorStateList.valueOf(MENU_TRACK_OFF)
             contentDescription = "Microphone peak level"
         }
@@ -2197,7 +2400,7 @@ class CarPlayHostActivity : ComponentActivity() {
             gravity = Gravity.CENTER_VERTICAL
         }
         header.addView(
-            menuText(title, 20f, MENU_SECONDARY),
+            menuText(title, 20f, MENU_LABEL),
             LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
         )
         val selectedIndex = values.indexOf(selectedValue)
@@ -2218,22 +2421,19 @@ class CarPlayHostActivity : ComponentActivity() {
                 ViewGroup.LayoutParams.WRAP_CONTENT,
             ),
         )
-        val seekBar = SeekBar(this).apply {
+        val seekBar = HostSlider(this).apply {
             max = (values.size - 1).coerceAtLeast(0)
             progress = selectedIndex
-            splitTrack = false
-            progressTintList = ColorStateList.valueOf(MENU_ACCENT)
-            thumbTintList = ColorStateList.valueOf(MENU_ACCENT)
-            setOnSeekBarChangeListener(
-                object : SeekBar.OnSeekBarChangeListener {
-                    override fun onProgressChanged(seekBar: SeekBar, progress: Int, fromUser: Boolean) {
+            setOnChangeListener(
+                object : HostSlider.OnChangeListener {
+                    override fun onProgressChanged(slider: HostSlider, progress: Int, fromUser: Boolean) {
                         val value = values.getOrNull(progress) ?: return
                         valueView.text = label(value)
                         if (fromUser) onValueChanged(value)
                     }
 
-                    override fun onStartTrackingTouch(seekBar: SeekBar) = Unit
-                    override fun onStopTrackingTouch(seekBar: SeekBar) = Unit
+                    override fun onStartTrackingTouch(slider: HostSlider) = Unit
+                    override fun onStopTrackingTouch(slider: HostSlider) = Unit
                 },
             )
         }
@@ -2252,7 +2452,7 @@ class CarPlayHostActivity : ComponentActivity() {
             orientation = LinearLayout.VERTICAL
         }
         section.addView(
-            menuText("AirPlay icon", 20f, MENU_SECONDARY),
+            menuText("AirPlay icon", 20f, MENU_LABEL),
             LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT,
@@ -2278,9 +2478,7 @@ class CarPlayHostActivity : ComponentActivity() {
             orientation = LinearLayout.VERTICAL
         }
         actions.addView(
-            Button(this).apply {
-                text = "Choose image"
-                isAllCaps = false
+            HostUi.chip(this, "Choose image").apply {
                 setOnClickListener {
                     externalActivityInProgress = true
                     imagePicker.launch("image/*")
@@ -2292,9 +2490,7 @@ class CarPlayHostActivity : ComponentActivity() {
             ),
         )
         actions.addView(
-            Button(this).apply {
-                text = "Default icon"
-                isAllCaps = false
+            HostUi.chip(this, "Default icon").apply {
                 setOnClickListener {
                     AirPlayPersistence.clearCustomAirPlayIcon(this@CarPlayHostActivity)
                     updateAirPlayIconPreview()
@@ -2339,7 +2535,7 @@ class CarPlayHostActivity : ComponentActivity() {
             orientation = LinearLayout.VERTICAL
         }
         section.addView(
-            menuText("Driving side", 20f, MENU_SECONDARY),
+            menuText("Driving side", 20f, MENU_LABEL),
             LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT,
@@ -2351,17 +2547,29 @@ class CarPlayHostActivity : ComponentActivity() {
         val left = RadioButton(this).apply {
             id = View.generateViewId()
             text = "Left-hand drive"
-            setTextColor(Color.WHITE)
+            styleChoiceButton(this)
             isChecked = !rightHandDrive
         }
         val right = RadioButton(this).apply {
             id = View.generateViewId()
             text = "Right-hand drive"
-            setTextColor(Color.WHITE)
+            styleChoiceButton(this)
             isChecked = rightHandDrive
         }
-        group.addView(left)
-        group.addView(right)
+        group.addView(
+            left,
+            RadioGroup.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            ).apply { marginEnd = dp(10) },
+        )
+        group.addView(
+            right,
+            RadioGroup.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            ),
+        )
         group.setOnCheckedChangeListener { _, checkedId ->
             rightHandDrive = checkedId == right.id
             updateResolutionMenu()
@@ -2381,7 +2589,7 @@ class CarPlayHostActivity : ComponentActivity() {
             orientation = LinearLayout.VERTICAL
         }
         section.addView(
-            menuText("Fullscreen", 20f, MENU_SECONDARY),
+            menuText("Fullscreen", 20f, MENU_LABEL),
             LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT,
@@ -2427,7 +2635,7 @@ class CarPlayHostActivity : ComponentActivity() {
             orientation = LinearLayout.VERTICAL
         }
         section.addView(
-            menuText("Safe area", 20f, MENU_SECONDARY),
+            menuText("Safe area", 20f, MENU_LABEL),
             LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT,
@@ -2445,17 +2653,13 @@ class CarPlayHostActivity : ComponentActivity() {
             orientation = LinearLayout.HORIZONTAL
         }
         buttons.addView(
-            Button(this).apply {
-                text = "Set"
-                isAllCaps = false
+            HostUi.chip(this, "Set").apply {
                 setOnClickListener { openSafeAreaEditor() }
             },
             LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
         )
         buttons.addView(
-            Button(this).apply {
-                text = "Reset"
-                isAllCaps = false
+            HostUi.chip(this, "Reset").apply {
                 setOnClickListener { resetSafeAreaForCurrentSize() }
             },
             LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
@@ -2490,7 +2694,7 @@ class CarPlayHostActivity : ComponentActivity() {
 
     private fun buildSafeAreaEditor(): View {
         val overlay = FrameLayout(this).apply {
-            setBackgroundColor(Color.BLACK)
+            setBackgroundColor(HostUi.BG)
             isClickable = true
         }
         val editor = SafeAreaEditorView(this)
@@ -2502,8 +2706,8 @@ class CarPlayHostActivity : ComponentActivity() {
             ),
         )
         overlay.addView(
-            menuText("Safe area", 24f, Color.WHITE, bold = true).apply {
-                setPadding(dp(16), dp(12), dp(16), dp(8))
+            menuText("\u276f safe area", 26f, MENU_LABEL, bold = true).apply {
+                setPadding(dp(20), dp(16), dp(20), dp(8))
             },
             FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.WRAP_CONTENT,
@@ -2517,17 +2721,13 @@ class CarPlayHostActivity : ComponentActivity() {
             setPadding(dp(16), dp(10), dp(16), dp(16))
         }
         controls.addView(
-            Button(this).apply {
-                text = "Cancel"
-                isAllCaps = false
+            HostUi.chip(this, "Cancel").apply {
                 setOnClickListener { closeSafeAreaEditor() }
             },
             LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
         )
         controls.addView(
-            Button(this).apply {
-                text = "Save"
-                isAllCaps = false
+            HostUi.chip(this, "Save", HostUi.ChipStyle.PRIMARY).apply {
                 setOnClickListener { saveSafeAreaEditor() }
             },
             LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
@@ -2557,7 +2757,7 @@ class CarPlayHostActivity : ComponentActivity() {
         orientation = LinearLayout.HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
         addView(
-            menuText(label, 18f, MENU_SECONDARY).apply {
+            menuText(label, 18f, MENU_LABEL).apply {
                 gravity = Gravity.CENTER_VERTICAL
             },
             LinearLayout.LayoutParams(
@@ -2568,11 +2768,13 @@ class CarPlayHostActivity : ComponentActivity() {
         addView(
             EditText(this@CarPlayHostActivity).apply {
                 setText(value)
-                textSize = 18f
-                setTextColor(Color.WHITE)
-                setHintTextColor(MENU_SECONDARY)
-                backgroundTintList = ColorStateList.valueOf(MENU_ACCENT)
-                minHeight = dp(48)
+                textSize = 19f
+                typeface = HostUi.mono()
+                setTextColor(HostUi.TEXT)
+                setHintTextColor(HostUi.FAINT)
+                background = HostUi.rounded(this@CarPlayHostActivity, 8, HostUi.SURFACE_3, HostUi.LINE_2)
+                setPadding(dp(16), dp(12), dp(16), dp(12))
+                minHeight = dp(56)
                 isSingleLine = true
                 inputType = when {
                     numeric -> InputType.TYPE_CLASS_NUMBER
@@ -2601,22 +2803,13 @@ class CarPlayHostActivity : ComponentActivity() {
         orientation = LinearLayout.HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
         addView(
-            menuText(label, 18f, MENU_SECONDARY),
+            menuText(label, 18f, MENU_LABEL),
             LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
         )
         addView(
-            Switch(this@CarPlayHostActivity).apply {
+            HostToggle(this@CarPlayHostActivity).apply {
                 isChecked = checked
                 contentDescription = description
-                showText = false
-                thumbTintList = ColorStateList(
-                    arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
-                    intArrayOf(MENU_ACCENT, MENU_SECONDARY),
-                )
-                trackTintList = ColorStateList(
-                    arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
-                    intArrayOf(MENU_ACCENT_TRACK, MENU_TRACK_OFF),
-                )
                 setOnCheckedChangeListener { _, value -> onChanged(value) }
             },
             LinearLayout.LayoutParams(
@@ -2652,7 +2845,7 @@ class CarPlayHostActivity : ComponentActivity() {
             orientation = LinearLayout.VERTICAL
         }
         section.addView(
-            menuText("Wi-Fi session", 20f, MENU_SECONDARY),
+            menuText("Wi-Fi session", 20f, MENU_LABEL),
             LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT,
@@ -2661,7 +2854,7 @@ class CarPlayHostActivity : ComponentActivity() {
 
         val group = RadioGroup(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(0, dp(8), 0, 0)
+            setPadding(0, dp(10), 0, 0)
         }
         val modes = buildList {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -2675,12 +2868,7 @@ class CarPlayHostActivity : ComponentActivity() {
             val button = RadioButton(this).apply {
                 id = View.generateViewId()
                 text = label
-                textSize = 18f
-                setTextColor(MENU_SECONDARY)
-                buttonTintList = ColorStateList(
-                    arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
-                    intArrayOf(MENU_ACCENT, MENU_SECONDARY),
-                )
+                styleChoiceButton(this)
                 tag = mode
                 isChecked = wirelessHotspotMode == mode
             }
@@ -2690,7 +2878,7 @@ class CarPlayHostActivity : ComponentActivity() {
                 RadioGroup.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.WRAP_CONTENT,
-                ),
+                ).apply { topMargin = dp(8) },
             )
         }
         if (selectedId != View.NO_ID) group.check(selectedId)
@@ -2889,7 +3077,7 @@ class CarPlayHostActivity : ComponentActivity() {
         this.text = text
         textSize = sizeSp
         setTextColor(color)
-        typeface = if (bold) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
+        typeface = if (bold) HostUi.monoBold() else HostUi.mono()
         includeFontPadding = false
     }
 
@@ -2921,6 +3109,7 @@ class CarPlayHostActivity : ComponentActivity() {
     }
 
     private fun updateHotspotStatusBlock() {
+        updateIdlePanel()
         if (!wirelessEnabled) {
             hotspotStatusView?.text = "Wireless hotspot: off"
             return
@@ -2946,38 +3135,41 @@ class CarPlayHostActivity : ComponentActivity() {
     ): View = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
         addView(
-            menuText(label, 18f, MENU_SECONDARY),
+            menuText(label, 18f, MENU_LABEL),
             LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT,
             ),
         )
+        // Two options read as one row of chips; three or more stay stacked, because a chip per
+        // option has to fit on the narrowest panel this app runs on.
+        val horizontal = options.size <= 2
         val group = RadioGroup(this@CarPlayHostActivity).apply {
-            orientation = RadioGroup.VERTICAL
-            setPadding(0, dp(4), 0, 0)
+            orientation = if (horizontal) RadioGroup.HORIZONTAL else RadioGroup.VERTICAL
+            setPadding(0, dp(10), 0, 0)
         }
         var selectedId = View.NO_ID
         for ((value, text) in options) {
             val button = RadioButton(this@CarPlayHostActivity).apply {
                 id = View.generateViewId()
                 this.text = text
-                textSize = 17f
-                setTextColor(MENU_SECONDARY)
-                buttonTintList = ColorStateList(
-                    arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
-                    intArrayOf(MENU_ACCENT, MENU_SECONDARY),
-                )
+                styleChoiceButton(this)
                 tag = value
                 isChecked = value == selected
             }
             if (value == selected) selectedId = button.id
-            group.addView(
-                button,
+            val params = if (horizontal) {
+                RadioGroup.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                ).apply { marginEnd = dp(10) }
+            } else {
                 RadioGroup.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.WRAP_CONTENT,
-                ),
-            )
+                ).apply { topMargin = dp(8) }
+            }
+            group.addView(button, params)
         }
         if (selectedId != View.NO_ID) group.check(selectedId)
         group.setOnCheckedChangeListener { radioGroup, checkedId ->
@@ -3901,11 +4093,10 @@ class CarPlayHostActivity : ComponentActivity() {
     private fun updateDebugOverlays() {
         val showLogs = debugLogsEnabled && !menuOpen
         statusScrollView?.visibility = if (showLogs) View.VISIBLE else View.GONE
-        disconnectedSettingsButton?.visibility =
+        idlePanel?.visibility =
             if (!menuOpen && activeScreenStreamTypes.isEmpty()) View.VISIBLE else View.GONE
-        val showStage = !debugLogsEnabled &&
-            !menuOpen &&
-            activeScreenStreamTypes.isEmpty()
+        updateIdlePanel()
+        val showStage = !menuOpen && activeScreenStreamTypes.isEmpty()
         stageStatusView?.visibility = if (showStage) View.VISIBLE else View.GONE
         // The build stamp sits under the picture, not on top of it: as soon as a screen stream is
         // active the CarPlay image is what the driver should see.
@@ -4212,23 +4403,27 @@ class CarPlayHostActivity : ComponentActivity() {
         const val FOUR_FINGER_COUNT = 4
         const val FOUR_FINGER_SWIPE_DISTANCE_DP = 72
         const val FOUR_FINGER_SWIPE_DIRECTION_RATIO = 1.15f
+        const val IDLE_PANEL_SIDE_BY_SIDE_PX = 1400
+        const val PANEL_EDGE_FRACTION = 0.042f
+        const val IDLE_TITLE_HEIGHT_FRACTION = 0.08f
+        const val IDLE_TITLE_WIDTH_FRACTION = 0.085f
         const val MAX_SETTINGS_MENU_WIDTH_PX = 1200
         const val MAX_SETTINGS_MENU_WIDTH_LANDSCAPE_PX = 2600
         const val LANDSCAPE_SETTINGS_MIN_WIDTH_PX = 1600
         const val LANDSCAPE_SETTINGS_WIDTH_FRACTION = 0.96f
-        const val MENU_TEXT_SCALE_REFERENCE_WIDTH_PX = 1920f
-        const val MENU_TEXT_SCALE_MAX = 1.5f
         const val SETTINGS_COLUMN_GAP_DP = 48
         const val MENU_CATEGORY_TAG = "settings-category"
         const val MENU_FOOTER_TAG = "settings-footer"
-        val MENU_BACKGROUND = Color.rgb(12, 16, 19)
-        val MENU_SECONDARY = Color.rgb(170, 180, 190)
-        val MENU_ACCENT = Color.rgb(127, 205, 154)
-        val MENU_ACCENT_TRACK = Color.rgb(78, 143, 102)
-        val MENU_TRACK_OFF = Color.rgb(64, 74, 80)
-        val MENU_BUTTON_TEXT = Color.rgb(8, 17, 11)
-        val MENU_DANGER = Color.rgb(190, 45, 45)
-        val NO_VIDEO_BACKGROUND = Color.rgb(0x16, 0x16, 0x18)
+        val MENU_BACKGROUND = HostUi.BG
+        val MENU_SECONDARY = HostUi.DIM
+        val MENU_LABEL = HostUi.TEXT
+        val MENU_FAINT = HostUi.FAINT
+        val MENU_ACCENT = HostUi.ACCENT
+        val MENU_ACCENT_TRACK = HostUi.ACCENT_DIM
+        val MENU_TRACK_OFF = HostUi.LINE_2
+        val MENU_BUTTON_TEXT = HostUi.BG
+        val MENU_DANGER = HostUi.ERROR
+        val NO_VIDEO_BACKGROUND = HostUi.BG
     }
 
     private data class DisplaySize(val width: Int, val height: Int)
