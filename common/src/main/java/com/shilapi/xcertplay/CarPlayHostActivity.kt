@@ -1119,12 +1119,19 @@ class CarPlayHostActivity : ComponentActivity() {
             // so the surface belongs to the panel and the rest of the screen stays see-through.
             setBackgroundColor(if (column) Color.TRANSPARENT else MENU_BACKGROUND)
             isClickable = true
+            // A tap on the picture beside the panel leaves the menu, the way the back control does.
+            // The picture is visible only because the session is still running, so a tap there reads
+            // as "I meant to touch CarPlay", not as "keep the settings open".
+            setOnClickListener { dismissSettingsMenu() }
         }
         // Header above, scrolling column below: the back control stays where the hand expects it
         // instead of scrolling away with the first block.
         val panel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(MENU_BACKGROUND)
+            // Clickable so a tap on the panel's own surface stops at the panel and does not reach the
+            // overlay's dismiss handler; its rows and footer handle their own touches.
+            isClickable = true
         }
         // One child list, two jobs: category headers stay in the column, while every row added after
         // one lands inside that category's block. Rows therefore keep no margins of their own - the
