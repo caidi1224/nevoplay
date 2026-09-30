@@ -185,6 +185,23 @@ Full debug APK, including the JNI/NDK path and packaging:
 ./gradlew :mobile:assembleDebug   # -> mobile/build/outputs/apk/debug/
 ```
 
+#### Local signing
+
+The build reads its signing identity from the same environment variables CI
+uses, and the debug variant uses it too when it is present - so a local APK can
+be installed over one built by CI, with no uninstall first:
+
+```bash
+source ~/.dsh/xcertplay-signing.env   # exports ANDROID_KEYSTORE_* (600, outside the repo)
+./gradlew :mobile:assembleDebug       # signed with the fork key
+```
+
+The keystore and that file live outside the repository and must never be
+committed. Losing the keystore means a new signing identity and one uninstall
+on every head unit, so keep a backup of `~/.dsh/xcertplay-fork.jks` and its
+password. The current certificate fingerprint is
+`744abb7537cac9237ed7566010d920527be90921d899fdea0f32f0b9d185405e`.
+
 Debug APKs land in `mobile/build/outputs/apk/debug/` and
 `automotive/build/outputs/apk/debug/`. Release signing needs
 `ANDROID_KEYSTORE_PATH` (or `ANDROID_KEYSTORE_PASSWORD`,
