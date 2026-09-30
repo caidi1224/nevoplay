@@ -1814,7 +1814,21 @@ class CarPlayController(
                 latch.countDown()
             }
         }
-        if (!adapter.getProfileProxy(appContext, listener, profile)) return emptySet()
+        // getProfileProxy binds a profile service, and some head units refuse that outright (a
+        // vendor Bluetooth stack answers "query intent receivers: Requires
+        // android.permission.INTERACT_ACROSS_USERS"). A refusal only means this query cannot tell
+        // which bonded device is connected - it must not take the whole bring-up down, or the retry
+        // loop rebuilds the Wi-Fi group every couple of seconds and nothing can connect.
+        val bound = try {
+            adapter.getProfileProxy(appContext, listener, profile)
+        } catch (error: SecurityException) {
+            Log.w(IphoneCarPlayConfiguration.TAG, "Bluetooth profile $profile is not readable", error)
+            false
+        } catch (error: RuntimeException) {
+            Log.w(IphoneCarPlayConfiguration.TAG, "Bluetooth profile $profile query failed", error)
+            false
+        }
+        if (!bound) return emptySet()
         if (!latch.await(3, TimeUnit.SECONDS)) {
             Log.w(IphoneCarPlayConfiguration.TAG, "Timed out reading Bluetooth profile $profile")
         }
