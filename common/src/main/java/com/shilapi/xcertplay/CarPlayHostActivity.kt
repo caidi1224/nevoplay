@@ -239,6 +239,13 @@ class CarPlayHostActivity : ComponentActivity() {
     private var idleHotspotValue: TextView? = null
     private var idleMfiValue: TextView? = null
     private var idleLogToggle: HostToggle? = null
+    private var contentRoot: View? = null
+    private var idleTitleBasePx = 0f
+
+    /** Top inset of the vehicle's own status bar while it is drawn over our content. */
+    private var statusBarTopInsetPx = 0
+    private var settingsContentPadding: IntArray? = null
+    private var settingsContentView: View? = null
     private var settingsMenu: View? = null
 
     /** The category block the settings column is currently filling; see [buildSettingsMenu]. */
@@ -639,6 +646,8 @@ class CarPlayHostActivity : ComponentActivity() {
         // the vehicle allows; fullscreen is re-asserted by onResume, onWindowFocusChanged, the
         // Settings switches and the baseline restore.
         stageStatusView?.maxWidth = (resources.displayMetrics.widthPixels * 0.78f).toInt()
+        updateIdleTitleSize()
+        applyBarInsets()
         scrollLogsToBottom()
         videoView?.post {
             val view = videoView ?: return@post
@@ -792,6 +801,7 @@ class CarPlayHostActivity : ComponentActivity() {
                 FrameLayout.LayoutParams.MATCH_PARENT,
             ),
         )
+        contentRoot = root
         videoView = video
         gestureOverlay = gestureLayer
         idlePanel = idle
@@ -887,15 +897,11 @@ class CarPlayHostActivity : ComponentActivity() {
 
         root.applyHostScale(homeTextScale(), homeSpaceScale())
         // The single piece of display type follows the panel, not the font scale: at 64sp a phone
-        // held in landscape would give a quarter of its height to one line.
-        stage.setTextSize(
-            TypedValue.COMPLEX_UNIT_PX,
-            minOf(
-                stage.textSize,
-                resources.displayMetrics.heightPixels * IDLE_TITLE_HEIGHT_FRACTION,
-                resources.displayMetrics.widthPixels * IDLE_TITLE_WIDTH_FRACTION,
-            ),
-        )
+        // held in landscape would give a quarter of its height to one line. The cap is applied
+        // against the window as it is *now* and re-applied whenever that window changes - the
+        // vehicle showing its status bar turns 2560x1600 into 2560x1440 in the middle of a session.
+        idleTitleBasePx = stage.textSize
+        updateIdleTitleSize()
         updateIdlePanel()
         return root
     }
@@ -968,6 +974,56 @@ class CarPlayHostActivity : ComponentActivity() {
             )
             addView(value, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 0.58f))
         }
+
+    /**
+     * Sizes the stage line against the window it is actually in, not the one measured at startup.
+     * The width term keeps the line from running off the side; the height term keeps a short panel -
+     * a head unit showing the vehicle's status bar is 2560x1440, not 2560x1600 - from giving a
+     * quarter of itself to one sentence.
+     */
+    private fun updateIdleTitleSize() {
+        val stage = stageStatusView ?: return
+        if (idleTitleBasePx <= 0f) return
+        val width = (contentRoot?.width ?: 0).takeIf { it > 0 }
+            ?: resources.displayMetrics.widthPixels
+        val height = (contentRoot?.height ?: 0).takeIf { it > 0 }
+            ?: resources.displayMetrics.heightPixels
+        stage.setTextSize(
+            TypedValue.COMPLEX_UNIT_PX,
+            minOf(
+                idleTitleBasePx,
+                height * IDLE_TITLE_HEIGHT_FRACTION,
+                width * IDLE_TITLE_WIDTH_FRACTION,
+            ),
+        )
+    }
+
+    /** True while the window covers the system bars and is therefore responsible for their space. */
+    private fun windowOwnsSystemBars(): Boolean =
+        hideTopBar && hideBottomBar && !vehicleEnforcesSystemBars
+
+    /**
+     * Only while the window is edge-to-edge does a visible vehicle status bar lie on top of our
+     * content; with decor-fits-system-windows the system has already inset the window, and adding
+     * the inset again would push everything down by twice the bar.
+     */
+    private fun applyBarInsets() {
+        val overlap = if (windowOwnsSystemBars()) statusBarTopInsetPx else 0
+        idlePanel?.let { panel ->
+            if (panel.paddingTop != overlap) panel.setPadding(0, overlap, 0, 0)
+        }
+        val content = settingsContentView ?: return
+        val base = settingsContentPadding ?: return
+        val top = base[1] + overlap
+        if (
+            content.paddingTop != top ||
+            content.paddingLeft != base[0] ||
+            content.paddingRight != base[2] ||
+            content.paddingBottom != base[3]
+        ) {
+            content.setPadding(base[0], top, base[2], base[3])
+        }
+    }
 
     private fun updateIdlePanel() {
         idleTransportValue?.text = if (wirelessEnabled) "wireless" else "usb"
@@ -1609,6 +1665,13 @@ class CarPlayHostActivity : ComponentActivity() {
             splitSettingsMenuIntoColumns(content)
         }
         overlay.applyHostScale(menuTextScale(), menuSpaceScale())
+        settingsContentPadding = intArrayOf(
+            content.paddingLeft,
+            content.paddingTop,
+            content.paddingRight,
+            content.paddingBottom,
+        )
+        settingsContentView = content
 
         resolutionValueView = resolutionValue
         resolutionPreviewView = preview
@@ -4262,6 +4325,13 @@ class CarPlayHostActivity : ComponentActivity() {
             mainHandler.post { applyFullscreenMode() }
         }
         // However the bars got here, the space they leave is the size CarPlay should run at.
+        // Re-applied on every dispatch rather than only when the number moves: the vehicle's latch
+        // flips without changing the inset, and the answer depends on that latch as well.
+        statusBarTopInsetPx = insets.getInsets(WindowInsetsCompat.Type.statusBars()).top
+        mainHandler.post {
+            applyBarInsets()
+            updateIdleTitleSize()
+        }
         refreshDisplaySizeAfterLayout()
     }
 
