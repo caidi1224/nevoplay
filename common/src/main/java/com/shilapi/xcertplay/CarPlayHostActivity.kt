@@ -232,7 +232,7 @@ class CarPlayHostActivity : ComponentActivity() {
 
     private var videoView: TextureView? = null
     private var gestureOverlay: View? = null
-    private var idleHomeView: View? = null
+    private var disconnectedSettingsButton: View? = null
     private var settingsMenu: View? = null
     private var mfiTargetGroup: RadioGroup? = null
     private var mfiI2cFields: View? = null
@@ -659,7 +659,6 @@ class CarPlayHostActivity : ComponentActivity() {
     }
 
     private fun buildContentView(): View {
-        GlassUi.scale = menuScale()
         val root = FrameLayout(this).apply {
             setBackgroundColor(NO_VIDEO_BACKGROUND)
         }
@@ -724,6 +723,17 @@ class CarPlayHostActivity : ComponentActivity() {
                 setColor(Color.argb(170, 0, 0, 0))
             }
         }
+        val settingsButton = ImageButton(this).apply {
+            setImageResource(R.drawable.ic_settings)
+            imageTintList = ColorStateList.valueOf(Color.rgb(0xA6, 0x7D, 0xF2))
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(Color.rgb(0xE3, 0xE3, 0xE4))
+            }
+            setPadding(dp(14), dp(14), dp(14), dp(14))
+            contentDescription = "Open settings"
+            setOnClickListener { openSettingsMenu() }
+        }
         val statusParams = FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.MATCH_PARENT,
             FrameLayout.LayoutParams.WRAP_CONTENT,
@@ -736,6 +746,11 @@ class CarPlayHostActivity : ComponentActivity() {
             Gravity.TOP or Gravity.END,
         )
         stageParams.setMargins(dp(12), dp(12), dp(12), 0)
+        val settingsButtonParams = FrameLayout.LayoutParams(
+            dp(80),
+            dp(80),
+            Gravity.BOTTOM or Gravity.START,
+        ).apply { setMargins(dp(16), 0, dp(16), dp(16)) }
         // Bottom-right corner: which build this is, so a head unit in the car can be identified
         // without pulling a log. Kept non-clickable so touches reach the video underneath.
         val buildLabel = TextView(this).apply {
@@ -768,16 +783,9 @@ class CarPlayHostActivity : ComponentActivity() {
                 FrameLayout.LayoutParams.MATCH_PARENT,
             ),
         )
-        val idleHome = buildIdleHome().apply { visibility = View.GONE }
-        root.addView(
-            idleHome,
-            FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT,
-                FrameLayout.LayoutParams.MATCH_PARENT,
-            ),
-        )
         root.addView(logScroll, statusParams)
         root.addView(stageStatus, stageParams)
+        root.addView(settingsButton, settingsButtonParams)
         root.addView(buildLabel, buildLabelParams)
         buildLabelView = buildLabel
         root.addView(
@@ -796,148 +804,23 @@ class CarPlayHostActivity : ComponentActivity() {
         )
         videoView = video
         gestureOverlay = gestureLayer
+        disconnectedSettingsButton = settingsButton
         settingsMenu = settings
         safeAreaEditor = editor
         statusView = log
         statusScrollView = logScroll
         stageStatusView = stageStatus
-        idleHomeView = idleHome
         updateDebugOverlays()
         return root
     }
 
-    /**
-     * The screen shown when no CarPlay picture is on the display.
-     *
-     * It replaces the old floating gear button, which sat inside CarPlay's own sidebar column. Every
-     * action here is real: the primary button asks the controller to start, the secondary one opens
-     * settings, and the gesture hint tells the driver how to get back in once the picture is up.
-     */
-    private fun buildIdleHome(): View {
-        val column = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(56), dp(40), dp(56), dp(40))
-        }
-
-        val brand = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
-        brand.addView(
-            ImageView(this).apply {
-                // The launcher icon itself, so the home screen and the app list agree without this
-                // module having to know which drawable the app declares.
-                setImageDrawable(packageManager.getApplicationIcon(applicationInfo))
-                adjustViewBounds = true
-            },
-            LinearLayout.LayoutParams(dp(52), dp(52)),
-        )
-        brand.addView(
-            GlassUi.text(this, "xcertplay", 27f, GlassUi.TEXT, bold = true).apply {
-                setPadding(dp(16), 0, 0, 0)
-            },
-        )
-        column.addView(brand, GlassUi.block(this))
-
-        column.addView(
-            GlassUi.text(
-                this,
-                "WIRELESS CARPLAY",
-                13f,
-                GlassUi.TEXT_TERTIARY,
-                bold = true,
-                letterSpacing = 0.18f,
-            ).apply { setPadding(0, dp(72), 0, 0) },
-            GlassUi.block(this),
-        )
-        column.addView(
-            GlassUi.text(this, "等待连接 iPhone", 56f, GlassUi.TEXT, bold = true),
-            GlassUi.block(this, 12),
-        )
-        column.addView(
-            GlassUi.text(
-                this,
-                "先在车机的蓝牙设置里配对手机，然后点下面的按钮。",
-                21f,
-                GlassUi.TEXT_SECONDARY,
-            ),
-            GlassUi.block(this, 16),
-        )
-
-        val card = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(30), dp(28), dp(30), dp(28))
-            background = GlassUi.glass(GlassUi.RADIUS_XL)
-            clipToOutline = true
-            elevation = dp(8).toFloat()
-        }
-        card.addView(
-            GlassUi.text(
-                this,
-                "无线 CarPlay",
-                14f,
-                GlassUi.TEXT_TERTIARY,
-                bold = true,
-                letterSpacing = 0.16f,
-            ),
-        )
-        card.addView(
-            GlassUi.primaryButton(this, "连接 iPhone") { maybeStartCarPlay() },
-            GlassUi.block(this, 18),
-        )
-        card.addView(
-            GlassUi.text(
-                this,
-                "保持蓝牙与 Wi-Fi 打开；首次连接需要在手机上确认一次。",
-                17f,
-                GlassUi.TEXT_TERTIARY,
-            ),
-            GlassUi.block(this, 16),
-        )
-        column.addView(card, GlassUi.block(this, 36))
-
-        column.addView(
-            GlassUi.ghostButton(this, "设置") { openSettingsMenu() },
-            GlassUi.block(this, 18),
-        )
-        column.addView(
-            GlassUi.text(
-                this,
-                "投屏后画面上没有任何按钮：三指下滑可随时打开设置。",
-                16f,
-                GlassUi.TEXT_TERTIARY,
-            ),
-            GlassUi.block(this, 20),
-        )
-
-        scaleMenuTextSize(column, menuTextScale())
-        // Content width follows the panel but stops growing so an ultra-wide display does not stretch
-        // one column of text across the whole screen; a ScrollView keeps short panels usable.
-        val holder = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        column.layoutParams = LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT,
-            ViewGroup.LayoutParams.WRAP_CONTENT,
-        )
-        holder.addView(column)
-        return ScrollView(this).apply {
-            isFillViewport = false
-            addView(
-                holder,
-                ViewGroup.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT,
-                ),
-            )
-        }
-    }
-
     private fun buildSettingsMenu(): View {
         val overlay = FrameLayout(this).apply {
-            setBackgroundColor(Color.argb(214, 3, 5, 10))
+            setBackgroundColor(Color.BLACK)
             isClickable = true
         }
         val panel = FrameLayout(this).apply {
-            background = GlassUi.backdrop(this@CarPlayHostActivity)
+            setBackgroundColor(MENU_BACKGROUND)
         }
         val content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -1561,7 +1444,9 @@ class CarPlayHostActivity : ComponentActivity() {
             }
         }
 
-        arrangeSettingsAsPages(content, panel, scroll)
+        if (settingsMenuIsLandscape()) {
+            splitSettingsMenuIntoColumns(content)
+        }
         scaleMenuTextSize(overlay, menuTextScale())
 
         resolutionValueView = resolutionValue
@@ -1591,7 +1476,9 @@ class CarPlayHostActivity : ComponentActivity() {
         }
 
     /** Text sizes are authored for a 1080p-wide panel; scale them up on larger panels. */
-    private fun menuTextScale(): Float = menuScale()
+    private fun menuTextScale(): Float =
+        (resources.displayMetrics.widthPixels / MENU_TEXT_SCALE_REFERENCE_WIDTH_PX)
+            .coerceIn(1f, MENU_TEXT_SCALE_MAX)
 
     private fun scaleMenuTextSize(root: View, scale: Float) {
         if (scale <= 1.001f) return
@@ -1603,137 +1490,6 @@ class CarPlayHostActivity : ComponentActivity() {
                 scaleMenuTextSize(root.getChildAt(index), scale)
             }
         }
-    }
-
-    /**
-     * Turns the column [buildSettingsMenu] assembled into two levels: a root page listing the
-     * categories, and one page per category holding that category's rows in a glass card.
-     *
-     * The partition is by tag, the same way the earlier two-column layout worked: a row tagged
-     * [MENU_CATEGORY_TAG] starts a category, and rows tagged [MENU_FOOTER_TAG] are pulled out into a
-     * bar pinned to the panel so "save and reconnect" stays reachable from every page. Nothing about
-     * how the rows themselves are built or read changes - they are moved, not rebuilt.
-     */
-    private fun arrangeSettingsAsPages(content: LinearLayout, panel: FrameLayout, rootScroll: View) {
-        if (content.childCount < 3) return
-
-        val title = content.getChildAt(0)
-        val footer = mutableListOf<View>()
-        val groups = mutableListOf<MutableList<View>>()
-        for (index in 1 until content.childCount) {
-            val child = content.getChildAt(index)
-            when {
-                child.tag == MENU_FOOTER_TAG -> footer.add(child)
-                else -> {
-                    if (groups.isEmpty() || child.tag == MENU_CATEGORY_TAG) groups.add(mutableListOf())
-                    groups.last().add(child)
-                }
-            }
-        }
-        if (groups.isEmpty()) return
-
-        content.removeAllViews()
-        val pageHost = FrameLayout(this)
-        panel.addView(
-            pageHost,
-            FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT,
-                FrameLayout.LayoutParams.MATCH_PARENT,
-            ),
-        )
-        val pages = mutableListOf<View>()
-        val showRoot = {
-            rootScroll.visibility = View.VISIBLE
-            pages.forEach { it.visibility = View.GONE }
-        }
-        val showPage: (Int) -> Unit = { index ->
-            rootScroll.visibility = View.GONE
-            pages.forEachIndexed { position, page -> page.visibility = if (position == index) View.VISIBLE else View.GONE }
-        }
-
-        (title as? TextView)?.let { heading ->
-            heading.setPadding(0, 0, 0, 0)
-            content.addView(heading, GlassUi.block(this))
-        }
-
-        groups.forEachIndexed { index, group ->
-            val label = group.firstOrNull { it.tag == MENU_CATEGORY_TAG }
-            val name = ((label as? TextView)?.text?.toString() ?: "Settings").trim()
-
-            val card = GlassUi.group(this)
-            group.forEach { view ->
-                if (view.tag != MENU_CATEGORY_TAG) GlassUi.addRow(card, view)
-            }
-
-            val column = LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
-                setPadding(dp(40), dp(40), dp(40), dp(160))
-                addView(GlassUi.sectionLabel(this@CarPlayHostActivity, name), GlassUi.block(this@CarPlayHostActivity))
-                addView(card, GlassUi.block(this@CarPlayHostActivity, 12))
-                addView(
-                    GlassUi.ghostButton(this@CarPlayHostActivity, "\u2039  返回") { showRoot() },
-                    GlassUi.block(this@CarPlayHostActivity, 26),
-                )
-            }
-            scaleMenuTextSize(column, menuTextScale())
-            val page = ScrollView(this).apply {
-                isFillViewport = false
-                visibility = View.GONE
-                addView(
-                    column,
-                    ViewGroup.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.WRAP_CONTENT,
-                    ),
-                )
-            }
-            pages.add(page)
-            pageHost.addView(
-                page,
-                FrameLayout.LayoutParams(
-                    FrameLayout.LayoutParams.MATCH_PARENT,
-                    FrameLayout.LayoutParams.MATCH_PARENT,
-                ),
-            )
-
-            content.addView(
-                GlassUi.categoryCard(this, name, "", GlassUi.accentDot(this)) {
-                    showPage(index)
-                },
-                GlassUi.block(this, 14),
-            )
-        }
-
-        if (footer.isNotEmpty()) {
-            val bar = LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
-                setPadding(dp(40), dp(14), dp(40), dp(20))
-                background = GlassUi.glass(GlassUi.RADIUS_XL, strong = true)
-            }
-            footer.forEach { view ->
-                (view.parent as? ViewGroup)?.removeView(view)
-                bar.addView(
-                    view,
-                    LinearLayout.LayoutParams(
-                        LinearLayout.LayoutParams.MATCH_PARENT,
-                        LinearLayout.LayoutParams.WRAP_CONTENT,
-                    ).apply { topMargin = dp(6) },
-                )
-            }
-            panel.addView(
-                bar,
-                FrameLayout.LayoutParams(
-                    FrameLayout.LayoutParams.MATCH_PARENT,
-                    FrameLayout.LayoutParams.WRAP_CONTENT,
-                    Gravity.BOTTOM,
-                ).apply {
-                    leftMargin = dp(24)
-                    rightMargin = dp(24)
-                    bottomMargin = dp(20)
-                },
-            )
-        }
-        showRoot()
     }
 
     /**
@@ -2106,11 +1862,7 @@ class CarPlayHostActivity : ComponentActivity() {
     }
 
     private fun settingsCategoryHeader(title: String): TextView =
-        GlassUi.sectionLabel(this, title).apply {
-                tag = MENU_CATEGORY_TAG
-                setPadding(GlassUi.dp(this@CarPlayHostActivity, 10), GlassUi.dp(this@CarPlayHostActivity, 26),
-                    GlassUi.dp(this@CarPlayHostActivity, 10), GlassUi.dp(this@CarPlayHostActivity, 12))
-            }
+        menuText(title, 16f, MENU_ACCENT, bold = true).apply { tag = MENU_CATEGORY_TAG }
 
     private fun buildLocationReportingSection(): View =
         LinearLayout(this).apply {
@@ -4149,14 +3901,8 @@ class CarPlayHostActivity : ComponentActivity() {
     private fun updateDebugOverlays() {
         val showLogs = debugLogsEnabled && !menuOpen
         statusScrollView?.visibility = if (showLogs) View.VISIBLE else View.GONE
-        // The idle home exists only while there is no picture: once CarPlay is on screen, the image
-        // is the interface and the three-finger swipe is the only way in.
-        idleHomeView?.visibility =
-            if (!menuOpen && !debugLogsEnabled && activeScreenStreamTypes.isEmpty()) {
-                View.VISIBLE
-            } else {
-                View.GONE
-            }
+        disconnectedSettingsButton?.visibility =
+            if (!menuOpen && activeScreenStreamTypes.isEmpty()) View.VISIBLE else View.GONE
         val showStage = !debugLogsEnabled &&
             !menuOpen &&
             activeScreenStreamTypes.isEmpty()
@@ -4411,35 +4157,7 @@ class CarPlayHostActivity : ComponentActivity() {
         }
     }
 
-    /**
-     * Density-independent size that also follows the panel's resolution.
-     *
-     * Sizes throughout this file were authored against a 1080p-wide panel. On a 2560x1600 head unit
-     * that leaves cards, paddings and touch targets phone-sized, so everything is scaled by the same
-     * factor the text already uses. Scaling here rather than at each call site keeps the 112 existing
-     * uses consistent and means a future panel needs no per-layout tuning.
-     */
-    private fun dp(value: Int): Int =
-        (value * menuScale() * resources.displayMetrics.density).toInt()
-
-    /**
-     * The single layout/text scale for whatever panel this is running on.
-     *
-     * Measured in density-independent units rather than pixels, and constrained by both axes, so a
-     * high-density large panel is not scaled twice (density already accounts for physical size) and a
-     * small or unusually short screen shrinks instead of overflowing. Reference is the 1280x800dp
-     * panel the layouts were drawn against; the floor lets small screens go down to 0.6x.
-     */
-    private fun menuScale(): Float {
-        val metrics = resources.displayMetrics
-        val density = metrics.density.takeIf { it > 0f } ?: 1f
-        val widthDp = metrics.widthPixels / density
-        val heightDp = metrics.heightPixels / density
-        return minOf(
-            widthDp / MENU_LAYOUT_REFERENCE_WIDTH_DP,
-            heightDp / MENU_LAYOUT_REFERENCE_HEIGHT_DP,
-        ).coerceIn(MENU_LAYOUT_SCALE_MIN, MENU_LAYOUT_SCALE_MAX)
-    }
+    private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
     private fun CarPlayStatus.describe(): String = when (this) {
         CarPlayStatus.DiscoveringMfi -> "Preparing MFi authentication"
@@ -4500,22 +4218,14 @@ class CarPlayHostActivity : ComponentActivity() {
         const val LANDSCAPE_SETTINGS_WIDTH_FRACTION = 0.96f
         const val MENU_TEXT_SCALE_REFERENCE_WIDTH_PX = 1920f
         const val MENU_TEXT_SCALE_MAX = 1.5f
-        /** Layouts are authored against this panel size, in dp. */
-        const val MENU_LAYOUT_REFERENCE_WIDTH_DP = 1280f
-        const val MENU_LAYOUT_REFERENCE_HEIGHT_DP = 800f
-        /** Small screens shrink; the floor keeps touch targets usable on the smallest panels. */
-        const val MENU_LAYOUT_SCALE_MIN = 0.6f
-        const val MENU_LAYOUT_SCALE_MAX = 2f
         const val SETTINGS_COLUMN_GAP_DP = 48
         const val MENU_CATEGORY_TAG = "settings-category"
         const val MENU_FOOTER_TAG = "settings-footer"
-        // Palette now comes from GlassUi so the whole UI moves together; the names stay so the
-        // hundreds of existing call sites keep working.
-        val MENU_BACKGROUND = GlassUi.BG
-        val MENU_SECONDARY = GlassUi.TEXT_SECONDARY
-        val MENU_ACCENT = GlassUi.ACCENT
-        val MENU_ACCENT_TRACK = GlassUi.ACCENT_DIM
-        val MENU_TRACK_OFF = GlassUi.SWITCH_TRACK_OFF
+        val MENU_BACKGROUND = Color.rgb(12, 16, 19)
+        val MENU_SECONDARY = Color.rgb(170, 180, 190)
+        val MENU_ACCENT = Color.rgb(127, 205, 154)
+        val MENU_ACCENT_TRACK = Color.rgb(78, 143, 102)
+        val MENU_TRACK_OFF = Color.rgb(64, 74, 80)
         val MENU_BUTTON_TEXT = Color.rgb(8, 17, 11)
         val MENU_DANGER = Color.rgb(190, 45, 45)
         val NO_VIDEO_BACKGROUND = Color.rgb(0x16, 0x16, 0x18)
