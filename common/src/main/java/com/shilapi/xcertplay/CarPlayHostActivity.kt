@@ -451,6 +451,7 @@ class CarPlayHostActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         initializeSessionLog()
         darkMode = isDarkMode(resources.configuration.uiMode)
+        HostUi.useDarkTheme(darkMode)
         advancedAudioChannelMappingSupported =
             resources.getBoolean(R.bool.config_advanced_audio_channel_mapping)
         airPlayIdentity = AirPlayPersistence.loadIdentity(this)
@@ -639,6 +640,7 @@ class CarPlayHostActivity : ComponentActivity() {
         if (nextDarkMode != darkMode) {
             darkMode = nextDarkMode
             syncAirPlayDarkMode()
+            applyTheme(rebuildViews = true)
         }
         // Deliberately no applyFullscreenMode() here. A head unit that insists on showing its own
         // status bar (typically as soon as the car is in gear) reports a new screen size, and
@@ -704,6 +706,30 @@ class CarPlayHostActivity : ComponentActivity() {
             isClickable = true
             setOnTouchListener { view, event -> onHostTouch(view, event) }
         }
+        root.addView(video)
+        root.addView(
+            gestureLayer,
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT,
+            ),
+        )
+        contentRoot = root
+        videoView = video
+        gestureOverlay = gestureLayer
+        buildThemedOverlays(root)
+        return root
+    }
+
+    /** Everything that has to be rebuilt when the palette changes; the video surface is not one. */
+    private val themedOverlays = mutableListOf<View>()
+
+    /**
+     * Builds the views whose colours come from the palette - log, idle panel, build stamp, settings
+     * and the safe-area editor - and attaches them to [root]. Kept separate from the video surface
+     * so a theme change can rebuild them without touching the CarPlay session.
+     */
+    private fun buildThemedOverlays(root: ViewGroup) {
         val log = TextView(this).apply {
             setTextColor(HostUi.TEXT)
             setPadding(dp(20), dp(16), dp(20), dp(16))
@@ -718,7 +744,7 @@ class CarPlayHostActivity : ComponentActivity() {
             background = HostUi.rounded(
                 this@CarPlayHostActivity,
                 10,
-                Color.argb(0xE8, 0x10, 0x13, 0x14),
+                HostUi.LOG_SCRIM,
                 HostUi.LINE,
             )
             isFillViewport = false
@@ -777,14 +803,6 @@ class CarPlayHostActivity : ComponentActivity() {
         val settings = buildSettingsMenu().apply { visibility = View.GONE }
         val editor = buildSafeAreaEditor().apply { visibility = View.GONE }
 
-        root.addView(video)
-        root.addView(
-            gestureLayer,
-            FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT,
-                FrameLayout.LayoutParams.MATCH_PARENT,
-            ),
-        )
         root.addView(logScroll, statusParams)
         root.addView(idle, idleParams)
         root.addView(buildLabel, buildLabelParams)
@@ -803,17 +821,47 @@ class CarPlayHostActivity : ComponentActivity() {
                 FrameLayout.LayoutParams.MATCH_PARENT,
             ),
         )
-        contentRoot = root
-        videoView = video
-        gestureOverlay = gestureLayer
         idlePanel = idle
         settingsMenu = settings
         safeAreaEditor = editor
         statusView = log
         statusScrollView = logScroll
         stageStatusView = stageStatus
+        themedOverlays += listOf(logScroll, idle, buildLabel, settings, editor)
         updateDebugOverlays()
-        return root
+    }
+
+    /**
+     * The vehicle decides the theme, and it can change it mid-session (night falls, the headlights
+     * come on, or the driver picks light in the head unit's own settings). Rebuilding the overlays
+     * is cheap and keeps the picture untouched; only the redraw changes colour.
+     */
+    private fun applyTheme(rebuildViews: Boolean) {
+        HostUi.useDarkTheme(darkMode)
+        applySystemBarPalette()
+        if (rebuildViews) {
+            val root = contentRoot as? ViewGroup ?: return
+            val editorWasOpen = safeAreaEditorActive
+            if (editorWasOpen) closeSafeAreaEditor()
+            themedOverlays.forEach { root.removeView(it) }
+            themedOverlays.clear()
+            buildThemedOverlays(root)
+            if (editorWasOpen) openSafeAreaEditor()
+        }
+    }
+
+    /**
+     * Bars and window background only - no hide or show request, so this can run on a theme change
+     * without joining the fight over who owns the bars.
+     */
+    @Suppress("DEPRECATION")
+    private fun applySystemBarPalette() {
+        window.statusBarColor = MENU_BACKGROUND
+        window.navigationBarColor = MENU_BACKGROUND
+        window.decorView.setBackgroundColor(MENU_BACKGROUND)
+        val controller = WindowInsetsControllerCompat(window, window.decorView)
+        controller.isAppearanceLightStatusBars = !darkMode
+        controller.isAppearanceLightNavigationBars = !darkMode
     }
 
     /**
@@ -1046,7 +1094,7 @@ class CarPlayHostActivity : ComponentActivity() {
 
     private fun buildSettingsMenu(): View {
         val overlay = FrameLayout(this).apply {
-            setBackgroundColor(Color.BLACK)
+            setBackgroundColor(MENU_BACKGROUND)
             isClickable = true
         }
         // Header above, scrolling column below: the back control stays where the hand expects it
@@ -3048,7 +3096,7 @@ class CarPlayHostActivity : ComponentActivity() {
             ).apply { topMargin = dp(10) },
         )
 
-        val error = menuText("", 14f, Color.rgb(0xff, 0x7a, 0x7a)).apply {
+        val error = menuText("", 14f, MENU_DANGER).apply {
             visibility = View.GONE
         }
         manualFields.addView(
@@ -4371,19 +4419,16 @@ class CarPlayHostActivity : ComponentActivity() {
     private fun applyFullscreenMode() {
         val hideTop = hideTopBar
         val hideBottom = hideBottomBar
-        // A fullscreen video surface must not flash the light theme while the bars animate in or out.
-        window.decorView.setBackgroundColor(Color.BLACK)
-        window.statusBarColor = Color.BLACK
-        window.navigationBarColor = Color.BLACK
+        // The window behind the surface follows the theme: it used to be black so a light theme
+        // could not flash through while the bars animate, and the palette is that same near-black
+        // in dark mode. In light mode the app really is light, and the window has to be too.
+        applySystemBarPalette()
         // Only a pair of bars we really control gets the edge-to-edge layout. While the vehicle owns
         // a bar the content has to be inset by it, which is what shrinks the video and makes the
         // CarPlay handshake pick the smaller resolution instead of hiding content behind the bar.
         val edgeToEdge = hideTop && hideBottom && !vehicleEnforcesSystemBars
         WindowCompat.setDecorFitsSystemWindows(window, !edgeToEdge)
         val controller = WindowInsetsControllerCompat(window, window.decorView)
-        // Black bars need light icons; the light theme is what made the forced status bar grey.
-        controller.isAppearanceLightStatusBars = false
-        controller.isAppearanceLightNavigationBars = false
         var requestedHide = false
         if (hideTop) {
             if (!vehicleEnforcesSystemBars) {
@@ -4474,16 +4519,18 @@ class CarPlayHostActivity : ComponentActivity() {
         const val SETTINGS_COLUMN_GAP_DP = 48
         const val MENU_CATEGORY_TAG = "settings-category"
         const val MENU_FOOTER_TAG = "settings-footer"
-        val MENU_BACKGROUND = HostUi.BG
-        val MENU_SECONDARY = HostUi.DIM
-        val MENU_LABEL = HostUi.TEXT
-        val MENU_FAINT = HostUi.FAINT
-        val MENU_ACCENT = HostUi.ACCENT
-        val MENU_ACCENT_TRACK = HostUi.ACCENT_DIM
-        val MENU_TRACK_OFF = HostUi.LINE_2
-        val MENU_BUTTON_TEXT = HostUi.BG
-        val MENU_DANGER = HostUi.ERROR
-        val NO_VIDEO_BACKGROUND = HostUi.BG
+        // Read through the palette on every access: the dark and light sets are swapped at runtime,
+        // and a `val` here would freeze whichever one was active when the class loaded.
+        val MENU_BACKGROUND: Int get() = HostUi.BG
+        val MENU_SECONDARY: Int get() = HostUi.DIM
+        val MENU_LABEL: Int get() = HostUi.TEXT
+        val MENU_FAINT: Int get() = HostUi.FAINT
+        val MENU_ACCENT: Int get() = HostUi.ACCENT
+        val MENU_ACCENT_TRACK: Int get() = HostUi.ACCENT_DIM
+        val MENU_TRACK_OFF: Int get() = HostUi.LINE_2
+        val MENU_BUTTON_TEXT: Int get() = HostUi.BG
+        val MENU_DANGER: Int get() = HostUi.ERROR
+        val NO_VIDEO_BACKGROUND: Int get() = HostUi.BG
     }
 
     private data class DisplaySize(val width: Int, val height: Int)

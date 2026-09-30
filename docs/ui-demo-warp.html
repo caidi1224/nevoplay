@@ -43,6 +43,29 @@
     --mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,"JetBrains Mono",
            "PingFang SC","Helvetica Neue",monospace;
   }
+  /* ---------------- 亮色主题：米白纸面 ----------------
+     车机报亮色时启用（浏览器里用 ?theme=light 预览）。与暗色共用同一套变量名，
+     所以布局代码一行都不用改；只有背景那一层从渐变换成平铺的米白。 */
+  body.light{
+    --bg:#f1eee6;
+    --surface:#fbf9f4;
+    --surface-2:#f0ece2;
+    --surface-3:#ffffff;
+    --line:#e1dcd1;
+    --line-2:#cfc7b8;
+    --text:#1d1c19;
+    --dim:#6b665c;
+    --faint:#8a8474;
+    --ok:#2f7d52;
+    --ok-dim:#9cc5ac;
+    --warn:#9a6b12;
+    --err:#c0392b;
+  }
+  body.light{background:var(--bg)}
+  body.light .screen{background:var(--bg)}
+  body.light .spec{background:var(--bg);border-color:var(--line)}
+  body.light .glass,body.light .chip,body.light .block,body.light .li.sel{color:var(--text)}
+  body.light .foot{color:var(--faint)}
   *{box-sizing:border-box;margin:0;padding:0}
   html,body{background:#060708}
   body{font-family:var(--mono);color:var(--text);-webkit-font-smoothing:antialiased}
@@ -206,6 +229,7 @@
         <li>等宽：数字对齐，滑杆与状态都用字符/方块表达</li>
         <li>克制：颜色只用于「开 / 连接 / 错误」三种语义</li>
         <li>缩放：文字与留白分开缩放——按面板 dp 宽度取系数，文字 0.8–1.5×，留白 0.35–1.5×；触控目标有下限</li>
+        <li>主题：车机暗色 → 现在这套；车机亮色 → 米白纸面（#f1eee6 底 / #fbf9f4 块），accent 由薄荷绿加深为 #2f7d52 以保证白底可读</li>
         <li>设置页：返回是左上角一个 ❯ 块，表头固定、只有分类区滚动；握手预览从 13 行压到 4 行，说明文字只留必要的一行</li>
         <li>状态栏：车辆强制显示自己的状态栏时可用区是 2560×1440（宽度不变，缩放不受影响）；高度只约束待机页大标题（≤8%），按当前窗口实时重算，并让出状态栏高度</li>
       </ul>
@@ -735,6 +759,7 @@
 <script>
   // ?only=N 只渲染第 N 屏（用于逐屏截图）；总览视图自动缩放到窗口宽度
   const params = new URLSearchParams(location.search);
+  if (params.get('theme') === 'light') document.body.classList.add('light');
   const only = params.get('only');
   if (only) {
     document.body.classList.add('single');

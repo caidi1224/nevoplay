@@ -7,6 +7,7 @@ import android.graphics.Paint
 import android.view.MotionEvent
 import android.view.View
 import com.shilapi.xcertplay.airplay.AirPlaySafeArea
+import com.shilapi.xcertplay.ui.HostUi
 import com.shilapi.xcertplay.airplay.SafeAreaRect
 
 /** Full-screen editor for the two horizontal and two vertical safe-area boundaries. */
@@ -20,19 +21,23 @@ class SafeAreaEditorView(context: Context) : View(context) {
 
     private val density = resources.displayMetrics.density
     private val touchRadius = 40f * density
-    private val dimPaint = Paint().apply { color = Color.argb(118, 0, 0, 0) }
+    // Read once, at construction: the activity rebuilds this view when the theme changes.
+    private val dark = HostUi.isDark
+    private val dimPaint = Paint().apply {
+        color = if (dark) Color.argb(118, 0, 0, 0) else Color.argb(96, 0x40, 0x3c, 0x33)
+    }
     private val linePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.rgb(127, 205, 154)
+        color = HostUi.ACCENT
         strokeWidth = 3f * density
         style = Paint.Style.STROKE
     }
     private val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.argb(210, 255, 255, 255)
+        color = if (dark) Color.argb(210, 255, 255, 255) else Color.argb(190, 0x1d, 0x1c, 0x19)
         strokeWidth = 1f * density
         style = Paint.Style.STROKE
     }
     private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.WHITE
+        color = if (dark) Color.WHITE else Color.rgb(0x1d, 0x1c, 0x19)
         textSize = 15f * density * resources.configuration.fontScale
         typeface = android.graphics.Typeface.MONOSPACE
     }

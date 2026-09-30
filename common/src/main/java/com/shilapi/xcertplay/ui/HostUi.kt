@@ -27,20 +27,94 @@ import kotlin.math.roundToInt
  * panels that are physically much wider or narrower than the 900dp reference.
  */
 object HostUi {
-    val BG = Color.rgb(0x0b, 0x0d, 0x0e)
-    val SURFACE = Color.rgb(0x10, 0x13, 0x14)
-    val SURFACE_2 = Color.rgb(0x17, 0x1a, 0x1c)
-    val SURFACE_3 = Color.rgb(0x1e, 0x22, 0x25)
-    val LINE = Color.rgb(0x23, 0x27, 0x2a)
-    val LINE_2 = Color.rgb(0x31, 0x36, 0x3a)
-    val TEXT = Color.rgb(0xe6, 0xe9, 0xe9)
-    val DIM = Color.rgb(0x8b, 0x93, 0x98)
-    val FAINT = Color.rgb(0x5c, 0x64, 0x69)
-    val ACCENT = Color.rgb(0x7f, 0xcd, 0x9a)
-    val ACCENT_DIM = Color.rgb(0x3f, 0x6b, 0x52)
-    val ACCENT_WASH = Color.argb(0x22, 0x7f, 0xcd, 0x9a)
-    val WARN = Color.rgb(0xe3, 0xb3, 0x41)
-    val ERROR = Color.rgb(0xe5, 0x53, 0x4b)
+    /**
+     * One palette, two sets of values. The vehicle decides which one is active (see
+     * `CarPlayHostActivity.applyTheme`): dark follows the existing terminal palette, light is the
+     * same layout on an off-white paper.
+     */
+    data class Palette(
+        val bg: Int,
+        val surface: Int,
+        val surface2: Int,
+        val surface3: Int,
+        val line: Int,
+        val line2: Int,
+        val text: Int,
+        val dim: Int,
+        val faint: Int,
+        val accent: Int,
+        val accentDim: Int,
+        val accentWash: Int,
+        val warn: Int,
+        val error: Int,
+        /** Fill behind the on-screen log, which sits on top of the CarPlay picture. */
+        val logScrim: Int,
+    )
+
+    private val DARK = Palette(
+        bg = 0xff0b0d0e.toInt(),
+        surface = 0xff101314.toInt(),
+        surface2 = 0xff171a1c.toInt(),
+        surface3 = 0xff1e2225.toInt(),
+        line = 0xff23272a.toInt(),
+        line2 = 0xff31363a.toInt(),
+        text = 0xffe6e9e9.toInt(),
+        dim = 0xff8b9398.toInt(),
+        faint = 0xff5c6469.toInt(),
+        accent = 0xff7fcd9a.toInt(),
+        accentDim = 0xff3f6b52.toInt(),
+        accentWash = 0x227fcd9a,
+        warn = 0xffe3b341.toInt(),
+        error = 0xffe5534b.toInt(),
+        logScrim = 0xe8101314.toInt(),
+    )
+
+    /**
+     * Off-white paper. The accent is darkened from the dark theme's mint: the same green at that
+     * lightness would be unreadable as text on a light surface.
+     */
+    private val LIGHT = Palette(
+        bg = 0xfff1eee6.toInt(),
+        surface = 0xfffbf9f4.toInt(),
+        surface2 = 0xfff0ece2.toInt(),
+        surface3 = 0xffffffff.toInt(),
+        line = 0xffe1dcd1.toInt(),
+        line2 = 0xffcfc7b8.toInt(),
+        text = 0xff1d1c19.toInt(),
+        dim = 0xff6b665c.toInt(),
+        faint = 0xff8a8474.toInt(),
+        accent = 0xff2f7d52.toInt(),
+        accentDim = 0xff9cc5ac.toInt(),
+        accentWash = 0x1f2f7d52,
+        warn = 0xff9a6b12.toInt(),
+        error = 0xffc0392b.toInt(),
+        logScrim = 0xe8fbf9f4.toInt(),
+    )
+
+    @Volatile
+    private var active: Palette = DARK
+
+    fun useDarkTheme(dark: Boolean) {
+        active = if (dark) DARK else LIGHT
+    }
+
+    val isDark: Boolean get() = active === DARK
+
+    val BG: Int get() = active.bg
+    val SURFACE: Int get() = active.surface
+    val SURFACE_2: Int get() = active.surface2
+    val SURFACE_3: Int get() = active.surface3
+    val LINE: Int get() = active.line
+    val LINE_2: Int get() = active.line2
+    val TEXT: Int get() = active.text
+    val DIM: Int get() = active.dim
+    val FAINT: Int get() = active.faint
+    val ACCENT: Int get() = active.accent
+    val ACCENT_DIM: Int get() = active.accentDim
+    val ACCENT_WASH: Int get() = active.accentWash
+    val WARN: Int get() = active.warn
+    val ERROR: Int get() = active.error
+    val LOG_SCRIM: Int get() = active.logScrim
 
     /**
      * The panel width the sizes here were authored for. A wider panel scales up, a narrower one
