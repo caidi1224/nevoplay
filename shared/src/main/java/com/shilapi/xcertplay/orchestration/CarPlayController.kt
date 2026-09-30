@@ -45,7 +45,9 @@ import com.shilapi.xcertplay.network.ManualHotspotManager
 import com.shilapi.xcertplay.network.WifiP2pGroupManager
 import com.shilapi.xcertplay.network.WirelessHotspotInfo
 import com.shilapi.xcertplay.network.WirelessHotspotManager
+import com.shilapi.xcertplay.network.WirelessHotspotRetention
 import com.shilapi.xcertplay.network.mfiCertificateWifiP2pCredentials
+import com.shilapi.xcertplay.network.wirelessHotspotSignature
 import com.shilapi.xcertplay.transport.BlockingDuplexByteStream
 import com.shilapi.xcertplay.transport.BluetoothRfcommDuplexStream
 import com.shilapi.xcertplay.transport.Ch341DeviceMatcher
@@ -194,6 +196,8 @@ class CarPlayController(
     @Volatile private var csm: Iap2Session? = null
     @Volatile private var activeSession: AirPlaySession? = null
     @Volatile private var hotspot: WirelessHotspotManager? = null
+    @Volatile private var hotspotInfo: WirelessHotspotInfo? = null
+    @Volatile private var hotspotSignature: String? = null
     @Volatile private var bonjour: CarPlayBonjour? = null
     @Volatile private var bluetoothSocket: BluetoothSocket? = null
     @Volatile private var bluetoothStream: BluetoothRfcommDuplexStream? = null
@@ -427,7 +431,18 @@ class CarPlayController(
         }
     }
 
-    override fun close() {
+    override fun close() = close(retainWirelessHotspot = false)
+
+    /**
+     * Closes the controller and tears the session down.
+     *
+     * A settings-driven handshake reset passes [retainWirelessHotspot]: the live Wi-Fi hotspot is
+     * handed to [WirelessHotspotRetention] instead of being removed, so the iPhone keeps the
+     * association, the group-owner address and the channel it already uses. The next controller
+     * picks the same hotspot up again when its credentials still match, otherwise the retained one
+     * is removed before a new one is started.
+     */
+    fun close(retainWirelessHotspot: Boolean) {
         synchronized(this) {
             if (closed) return
             closed = true
@@ -447,10 +462,20 @@ class CarPlayController(
             {
                 try {
                     if (config.transport == CarPlayTransport.WIRELESS) {
-                        closeBestEffort("wireless stack") { closeWirelessStack(service) }
+                        closeBestEffort("wireless stack") {
+                            closeWirelessStack(service, retainHotspot = retainWirelessHotspot)
+                        }
                     } else {
                         closeBestEffort("CSM") { csm?.close() }
                         csm = null
+                    }
+                    // A hotspot this controller already handed on, and that no later controller took
+                    // over, belongs to a session that is over: remove it rather than leave the radio
+                    // occupied for the next app run.
+                    if (!retainWirelessHotspot) {
+                        closeBestEffort("retained wireless hotspot") {
+                            WirelessHotspotRetention.shared.close()
+                        }
                     }
                     closeBestEffort("USBMUX") { mux?.close() }
                     mux = null
@@ -1481,15 +1506,55 @@ class CarPlayController(
         } else {
             config.wirelessHotspotMode
         }
+        val p2pCredentials = if (hotspotMode == WirelessHotspotMode.WIFI_P2P) {
+            mfiCertificateWifiP2pCredentials(mfi.readCertificate())
+        } else {
+            null
+        }
+        // Only a hotspot whose credentials the phone was already told about may be reused; anything
+        // else (a changed certificate, another SSID, band or channel) has to become a new network.
+        val signature = when (hotspotMode) {
+            WirelessHotspotMode.WIFI_P2P -> {
+                val credentials = checkNotNull(p2pCredentials)
+                wirelessHotspotSignature(
+                    backend = hotspotMode.name,
+                    ssid = credentials.ssid,
+                    passphrase = credentials.passphrase,
+                )
+            }
+            WirelessHotspotMode.LOCAL_ONLY_HOTSPOT ->
+                wirelessHotspotSignature(backend = hotspotMode.name)
+            WirelessHotspotMode.MANUAL -> wirelessHotspotSignature(
+                backend = hotspotMode.name,
+                ssid = config.manualHotspotSsid,
+                passphrase = config.manualHotspotPassphrase,
+                band = config.manualHotspotBand.name,
+                channel = config.manualHotspotChannel,
+                security = config.manualHotspotSecurity.name,
+            )
+        }
+        val retained = WirelessHotspotRetention.shared.take(signature)
+        if (retained != null) {
+            debugLog(
+                "wireless reusing the hotspot kept alive across the handshake reset " +
+                    "ssid=${retained.info.ssid} " +
+                    "address=${retained.info.hostAddress?.hostAddress ?: "unknown"} " +
+                    "channel=${retained.info.channel}",
+            )
+            hotspot = retained.manager
+            hotspotInfo = retained.info
+            hotspotSignature = signature
+            return retained.info
+        }
         val manager: WirelessHotspotManager = when (hotspotMode) {
-            WirelessHotspotMode.WIFI_P2P ->
-                mfiCertificateWifiP2pCredentials(mfi.readCertificate()).let { credentials ->
-                    WifiP2pGroupManager(
-                        context = appContext,
-                        networkName = credentials.ssid,
-                        passphrase = credentials.passphrase,
-                    )
-                }
+            WirelessHotspotMode.WIFI_P2P -> {
+                val credentials = checkNotNull(p2pCredentials)
+                WifiP2pGroupManager(
+                    context = appContext,
+                    networkName = credentials.ssid,
+                    passphrase = credentials.passphrase,
+                )
+            }
             WirelessHotspotMode.LOCAL_ONLY_HOTSPOT -> LocalOnlyHotspotManager(appContext)
             WirelessHotspotMode.MANUAL -> ManualHotspotManager(
                 context = appContext,
@@ -1502,15 +1567,20 @@ class CarPlayController(
             )
         }
         hotspot = manager
+        hotspotSignature = signature
         val timeoutMillis = if (hotspotMode == WirelessHotspotMode.WIFI_P2P) {
             WIFI_P2P_START_TIMEOUT_MILLIS
         } else {
             HOTSPOT_START_TIMEOUT_MILLIS
         }
         return try {
-            manager.start(timeoutMillis)
+            manager.start(timeoutMillis).also { hotspotInfo = it }
         } catch (failure: Exception) {
-            if (hotspot === manager) hotspot = null
+            if (hotspot === manager) {
+                hotspot = null
+                hotspotInfo = null
+                hotspotSignature = null
+            }
             closeBestEffort(hotspotMode.name) { manager.close() }
             if (isStaleWirelessRun(generation)) throw failure
             throw IOException(
@@ -1644,7 +1714,15 @@ class CarPlayController(
         }
     }
 
-    private fun closeWirelessStack(service: CarPlayVpnService? = vpnService) {
+    /**
+     * Releases the wireless stack. With [retainHotspot] a live hotspot is handed to
+     * [WirelessHotspotRetention] instead of being removed - that is the whole point of a
+     * settings-driven reset, which must leave the phone associated to the group it already uses.
+     */
+    private fun closeWirelessStack(
+        service: CarPlayVpnService? = vpnService,
+        retainHotspot: Boolean = false,
+    ) {
         media.setIapTunnelHandler(null)
         val activeTunnel = wirelessTunnelChannel
         wirelessTunnelChannel = null
@@ -1657,8 +1735,27 @@ class CarPlayController(
         if (activeBonjour != null) closeBestEffort("Bonjour") { activeBonjour.close() }
 
         val activeHotspot = hotspot
+        val activeHotspotInfo = hotspotInfo
+        val activeHotspotSignature = hotspotSignature
         hotspot = null
-        if (activeHotspot != null) closeBestEffort("wireless hotspot") { activeHotspot.close() }
+        hotspotInfo = null
+        hotspotSignature = null
+        when {
+            activeHotspot == null -> Unit
+            retainHotspot && activeHotspotInfo != null && activeHotspotSignature != null -> {
+                debugLog(
+                    "wireless hotspot kept alive for the next handshake ssid=${activeHotspotInfo.ssid} " +
+                        "address=${activeHotspotInfo.hostAddress?.hostAddress ?: "unknown"} " +
+                        "channel=${activeHotspotInfo.channel}",
+                )
+                WirelessHotspotRetention.shared.retain(
+                    signature = activeHotspotSignature,
+                    manager = activeHotspot,
+                    info = activeHotspotInfo,
+                )
+            }
+            else -> closeBestEffort("wireless hotspot") { activeHotspot.close() }
+        }
         wirelessIdentification = null
         wirelessAirPlayEndpoint = null
         wirelessHandoffRequested.set(false)
@@ -1943,6 +2040,14 @@ class CarPlayController(
     }
 
     companion object {
+        /**
+         * Removes a hotspot parked by a settings-driven reset when the app is not coming back to
+         * it - an exit from inside the settings menu, where no controller is left to close.
+         */
+        fun releaseRetainedWirelessHotspot() {
+            WirelessHotspotRetention.shared.close()
+        }
+
         private const val NOW_PLAYING_UPDATE = 0x5001
         private const val MEDIA_REMOTE_SEND_TIMEOUT_MILLIS = 2_000L
         private const val HID_REPORT_HOLD_MILLIS = 50L

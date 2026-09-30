@@ -3941,7 +3941,9 @@ class CarPlayHostActivity : ComponentActivity() {
         updateResolutionMenu()
         teardownExecutor.execute {
             try {
-                oldController?.close()
+                // Keep the Wi-Fi hotspot: the iPhone is associated with that group, and the fresh
+                // handshake after the menu hands the same group back so the phone keeps its address.
+                oldController?.close(retainWirelessHotspot = true)
                 oldController?.awaitClosed(CONTROLLER_CLOSE_TIMEOUT_MILLIS)
             } finally {
                 try {
@@ -4022,6 +4024,9 @@ class CarPlayHostActivity : ComponentActivity() {
             oldController?.close()
             val clean = oldController?.awaitClosed(CONTROLLER_CLOSE_TIMEOUT_MILLIS) ?: true
             oldSink?.close()
+            // Exiting from inside the settings menu leaves no controller: the hotspot it parked for
+            // the next handshake has to be removed here, or it outlives the app.
+            CarPlayController.releaseRetainedWirelessHotspot()
             airPlayCommandExecutor.shutdown()
             if (terminateProcess) {
                 applicationContext.stopService(Intent(applicationContext, CarPlayVpnService::class.java))
