@@ -3752,7 +3752,7 @@ class CarPlayHostActivity : ComponentActivity() {
                 edgeSettingsGestureEligible = edgeSettingsGestureCaptured
             }
             MotionEvent.ACTION_POINTER_DOWN -> {
-                if (event.pointerCount == THREE_FINGER_COUNT && !gestureSequenceActive) {
+                if (event.pointerCount == FOUR_FINGER_COUNT && !gestureSequenceActive) {
                     edgeSettingsGestureCaptured = false
                     edgeSettingsGestureEligible = false
                     gestureSequenceActive = true
@@ -3760,7 +3760,7 @@ class CarPlayHostActivity : ComponentActivity() {
                     gestureStartX = pointerCentroid(event, horizontal = true)
                     gestureStartY = pointerCentroid(event, horizontal = false)
                     controller?.sendTouch(emptyList())
-                    appendLog("Three-finger swipe tracking started")
+                    appendLog("Four-finger swipe tracking started")
                     return true
                 }
             }
@@ -3791,7 +3791,7 @@ class CarPlayHostActivity : ComponentActivity() {
         }
 
         if (gestureSequenceActive) {
-            if (!gestureTracking || event.pointerCount != THREE_FINGER_COUNT) {
+            if (!gestureTracking || event.pointerCount != FOUR_FINGER_COUNT) {
                 if (event.actionMasked == MotionEvent.ACTION_UP ||
                     event.actionMasked == MotionEvent.ACTION_CANCEL
                 ) {
@@ -3806,8 +3806,8 @@ class CarPlayHostActivity : ComponentActivity() {
                 val deltaX = Math.abs(pointerCentroid(event, horizontal = true) - gestureStartX)
                 val deltaY = pointerCentroid(event, horizontal = false) - gestureStartY
                 if (
-                    deltaY >= dp(THREE_FINGER_SWIPE_DISTANCE_DP) &&
-                    deltaY >= deltaX * THREE_FINGER_SWIPE_DIRECTION_RATIO
+                    deltaY >= dp(FOUR_FINGER_SWIPE_DISTANCE_DP) &&
+                    deltaY >= deltaX * FOUR_FINGER_SWIPE_DIRECTION_RATIO
                 ) {
                     gestureSequenceActive = false
                     gestureTracking = false
@@ -4209,9 +4209,9 @@ class CarPlayHostActivity : ComponentActivity() {
         const val AUDIO_CAPTURE_MARKER = "audio-capture.enabled"
         const val AUDIO_CAPTURE_DIRECTORY = "audio-captures"
         const val PROTOCOL_TRACE_PREFIX = "TRACE "
-        const val THREE_FINGER_COUNT = 3
-        const val THREE_FINGER_SWIPE_DISTANCE_DP = 72
-        const val THREE_FINGER_SWIPE_DIRECTION_RATIO = 1.15f
+        const val FOUR_FINGER_COUNT = 4
+        const val FOUR_FINGER_SWIPE_DISTANCE_DP = 72
+        const val FOUR_FINGER_SWIPE_DIRECTION_RATIO = 1.15f
         const val MAX_SETTINGS_MENU_WIDTH_PX = 1200
         const val MAX_SETTINGS_MENU_WIDTH_LANDSCAPE_PX = 2600
         const val LANDSCAPE_SETTINGS_MIN_WIDTH_PX = 1600
