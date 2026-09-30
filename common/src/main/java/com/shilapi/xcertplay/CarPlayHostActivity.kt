@@ -21,6 +21,7 @@ import android.os.Process
 import android.provider.Settings
 import android.text.Editable
 import android.text.InputType
+import android.text.TextUtils
 import android.text.TextWatcher
 import android.util.Log
 import android.util.TypedValue
@@ -765,11 +766,17 @@ class CarPlayHostActivity : ComponentActivity() {
         // video stream is active, so the CarPlay picture never competes with it.
         val stageStatus = TextView(this).apply {
             setTextColor(HostUi.TEXT)
-            textSize = 64f
+            textSize = IDLE_TITLE_TEXT_SP
             typeface = HostUi.monoBold()
             includeFontPadding = false
             letterSpacing = -0.02f
             maxWidth = (resources.displayMetrics.widthPixels * 0.78f).toInt()
+            // Two lines are reserved whether the message needs them or not. The stage is the only
+            // thing between the wordmark and the Settings row, so a message that wrapped onto a
+            // second line used to push that row down and the next one pulled it back up.
+            minLines = IDLE_TITLE_MIN_LINES
+            maxLines = IDLE_TITLE_MAX_LINES
+            ellipsize = TextUtils.TruncateAt.END
             text = latestStage
         }
         val idle = buildIdlePanel(stageStatus).apply { visibility = View.GONE }
@@ -4568,8 +4575,11 @@ class CarPlayHostActivity : ComponentActivity() {
         const val THREE_FINGER_DOUBLE_TAP_WINDOW_MILLIS = 700L
         const val IDLE_PANEL_SIDE_BY_SIDE_PX = 1400
         const val PANEL_EDGE_FRACTION = 0.042f
-        const val IDLE_TITLE_HEIGHT_FRACTION = 0.08f
-        const val IDLE_TITLE_WIDTH_FRACTION = 0.085f
+        const val IDLE_TITLE_TEXT_SP = 48f
+        const val IDLE_TITLE_MIN_LINES = 2
+        const val IDLE_TITLE_MAX_LINES = 3
+        const val IDLE_TITLE_HEIGHT_FRACTION = 0.055f
+        const val IDLE_TITLE_WIDTH_FRACTION = 0.06f
         const val MAX_SETTINGS_MENU_WIDTH_PX = 1200
         const val MAX_SETTINGS_MENU_WIDTH_LANDSCAPE_PX = 2600
         const val LANDSCAPE_SETTINGS_MIN_WIDTH_PX = 1600
