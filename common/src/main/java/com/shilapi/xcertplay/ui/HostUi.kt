@@ -150,9 +150,9 @@ class HostBlock(
             gravity = Gravity.CENTER_VERTICAL
             setPadding(
                 HostUi.dp(context, 26),
-                HostUi.dp(context, 16),
+                HostUi.dp(context, 12),
                 HostUi.dp(context, 26),
-                HostUi.dp(context, 16),
+                HostUi.dp(context, 12),
             )
         }
         header.addView(
@@ -186,9 +186,9 @@ class HostBlock(
         }
         row.setPadding(
             HostUi.dp(context, 26),
-            HostUi.dp(context, 18),
+            HostUi.dp(context, 14),
             HostUi.dp(context, 26),
-            HostUi.dp(context, 18),
+            HostUi.dp(context, 14),
         )
         rows.addView(row, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
     }

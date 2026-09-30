@@ -206,6 +206,7 @@
         <li>等宽：数字对齐，滑杆与状态都用字符/方块表达</li>
         <li>克制：颜色只用于「开 / 连接 / 错误」三种语义</li>
         <li>缩放：文字与留白分开缩放——按面板 dp 宽度取系数，文字 0.8–1.5×，留白 0.35–1.5×；触控目标有下限</li>
+        <li>设置页：返回是左上角一个 ❯ 块，表头固定、只有分类区滚动；握手预览从 13 行压到 4 行，说明文字只留必要的一行</li>
         <li>状态栏：车辆强制显示自己的状态栏时可用区是 2560×1440（宽度不变，缩放不受影响）；高度只约束待机页大标题（≤8%），按当前窗口实时重算，并让出状态栏高度</li>
       </ul>
     </div>
@@ -358,10 +359,9 @@
 <!-- ============================ 2. 设置 · 总览 ============================ -->
 <section class="screen" id="s2">
   <div class="topbar">
-    <span class="prompt" style="font-size:30px">❯</span>
+    <span class="chip chip--act" style="min-width:0;padding:0 18px">❯</span>
     <span class="brand">设置</span>
     <span class="crumb">/ 全部</span>
-    <div class="right"><span class="chip"><kbd style="border:0;background:none;height:auto">esc</kbd>返回</span></div>
   </div>
   <div class="hr" style="left:72px;right:72px;top:142px"></div>
 
@@ -386,39 +386,39 @@
       <div class="l2">MFi 通道 · 无线 CarPlay · 热点</div>
     </div>
     <div class="li">
-      <div class="l1"><span class="car" style="color:var(--faint)">&nbsp;</span><span style="color:var(--faint);width:60px">02</span>Location
+      <div class="l1"><span class="car" style="color:var(--faint)">&nbsp;</span><span style="color:var(--faint);width:60px">02</span>Diagnostics
+        <span class="keys"><span style="font-size:20px;color:var(--faint)">3 项</span></span></div>
+      <div class="l2">调试日志 · 构建号 · 日志路径</div>
+    </div>
+    <div class="li">
+      <div class="l1"><span class="car" style="color:var(--faint)">&nbsp;</span><span style="color:var(--faint);width:60px">03</span>Location
         <span class="keys"><span style="font-size:20px;color:var(--faint)">1 项</span></span></div>
       <div class="l2">向 iPhone 上报位置</div>
     </div>
     <div class="li">
-      <div class="l1"><span class="car" style="color:var(--faint)">&nbsp;</span><span style="color:var(--faint);width:60px">03</span>Startup
+      <div class="l1"><span class="car" style="color:var(--faint)">&nbsp;</span><span style="color:var(--faint);width:60px">04</span>Startup
         <span class="keys"><span style="font-size:20px;color:var(--faint)">1 项</span></span></div>
       <div class="l2">开机自动启动</div>
     </div>
     <div class="li">
-      <div class="l1"><span class="car" style="color:var(--faint)">&nbsp;</span><span style="color:var(--faint);width:60px">04</span>Audio
+      <div class="l1"><span class="car" style="color:var(--faint)">&nbsp;</span><span style="color:var(--faint);width:60px">05</span>Audio
         <span class="keys"><span style="font-size:20px;color:var(--faint)">2 项</span></span></div>
       <div class="l2">麦克风增益 · 声道映射</div>
     </div>
     <div class="li">
-      <div class="l1"><span class="car" style="color:var(--faint)">&nbsp;</span><span style="color:var(--faint);width:60px">05</span>Identity &amp; appearance
+      <div class="l1"><span class="car" style="color:var(--faint)">&nbsp;</span><span style="color:var(--faint);width:60px">06</span>Identity &amp; appearance
         <span class="keys"><span style="font-size:20px;color:var(--faint)">3 项</span></span></div>
       <div class="l2">设备名 · AirPlay 图标 · 驾驶侧</div>
     </div>
     <div class="li">
-      <div class="l1"><span class="car" style="color:var(--faint)">&nbsp;</span><span style="color:var(--faint);width:60px">06</span>Display &amp; video
+      <div class="l1"><span class="car" style="color:var(--faint)">&nbsp;</span><span style="color:var(--faint);width:60px">07</span>Display &amp; video
         <span class="keys"><span style="font-size:20px;color:var(--faint)">6 项</span></span></div>
       <div class="l2">分辨率 · 帧率 · 物理尺寸 · HEVC · 安全区</div>
     </div>
     <div class="li">
-      <div class="l1"><span class="car" style="color:var(--faint)">&nbsp;</span><span style="color:var(--faint);width:60px">07</span>Window
+      <div class="l1"><span class="car" style="color:var(--faint)">&nbsp;</span><span style="color:var(--faint);width:60px">08</span>Window
         <span class="keys"><span style="font-size:20px;color:var(--faint)">2 项</span></span></div>
       <div class="l2">全屏 · 更多手势</div>
-    </div>
-    <div class="li">
-      <div class="l1"><span class="car" style="color:var(--faint)">&nbsp;</span><span style="color:var(--faint);width:60px">08</span>Diagnostics
-        <span class="keys"><span style="font-size:20px;color:var(--faint)">3 项</span></span></div>
-      <div class="l2">调试日志 · 构建号 · 日志路径</div>
     </div>
   </div>
 
@@ -461,12 +461,11 @@
 <!-- ============================ 3. 设置 · 详情（显示与视频） ============================ -->
 <section class="screen" id="s3">
   <div class="topbar">
-    <span class="prompt" style="font-size:30px">❯</span>
+    <span class="chip chip--act" style="min-width:0;padding:0 18px">❯</span>
     <span class="brand">设置</span>
     <span class="crumb">/ display &amp; video</span>
     <div class="right">
       <span class="chip on"><span class="dot">●</span>未保存 1 项</span>
-      <span class="chip"><span class="dot">esc</span>返回</span>
     </div>
   </div>
   <div class="hr" style="left:72px;right:72px;top:142px"></div>

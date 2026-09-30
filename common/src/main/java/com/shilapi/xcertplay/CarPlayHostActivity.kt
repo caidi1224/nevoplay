@@ -246,6 +246,8 @@ class CarPlayHostActivity : ComponentActivity() {
     private var statusBarTopInsetPx = 0
     private var settingsContentPadding: IntArray? = null
     private var settingsContentView: View? = null
+    private var settingsHeaderView: View? = null
+    private var settingsHeaderPadding: IntArray? = null
     private var settingsMenu: View? = null
 
     /** The category block the settings column is currently filling; see [buildSettingsMenu]. */
@@ -1012,9 +1014,19 @@ class CarPlayHostActivity : ComponentActivity() {
         idlePanel?.let { panel ->
             if (panel.paddingTop != overlap) panel.setPadding(0, overlap, 0, 0)
         }
+        // The header owns the top edge of the panel, so it takes the vehicle's status bar inset;
+        // the scrolling column sits below it and needs nothing.
+        val header = settingsHeaderView
+        val headerBase = settingsHeaderPadding
+        if (header != null && headerBase != null) {
+            val headerTop = headerBase[1] + overlap
+            if (header.paddingTop != headerTop) {
+                header.setPadding(headerBase[0], headerTop, headerBase[2], headerBase[3])
+            }
+        }
         val content = settingsContentView ?: return
         val base = settingsContentPadding ?: return
-        val top = base[1] + overlap
+        val top = base[1]
         if (
             content.paddingTop != top ||
             content.paddingLeft != base[0] ||
@@ -1037,7 +1049,10 @@ class CarPlayHostActivity : ComponentActivity() {
             setBackgroundColor(Color.BLACK)
             isClickable = true
         }
-        val panel = FrameLayout(this).apply {
+        // Header above, scrolling column below: the back control stays where the hand expects it
+        // instead of scrolling away with the first block.
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
             setBackgroundColor(MENU_BACKGROUND)
         }
         // One child list, two jobs: category blocks and the tagged footer stay in the column (the
@@ -1063,39 +1078,32 @@ class CarPlayHostActivity : ComponentActivity() {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
             val side = panelEdgePadding()
-            setPadding(side, (side * 0.75f).toInt(), side, side)
+            setPadding(side, (side * 0.35f).toInt(), side, side)
         }
-        content.addView(
-            LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                addView(
-                    menuText("❯", 30f, MENU_ACCENT, bold = true),
-                    LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.WRAP_CONTENT,
-                        ViewGroup.LayoutParams.WRAP_CONTENT,
-                    ).apply { marginEnd = dp(16) },
-                )
-                addView(
-                    menuText("Settings", 32f, MENU_LABEL, bold = true),
-                    LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.WRAP_CONTENT,
-                        ViewGroup.LayoutParams.WRAP_CONTENT,
-                    ),
-                )
-                addView(
-                    menuText("xcertplay", 22f, MENU_FAINT),
-                    LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.WRAP_CONTENT,
-                        ViewGroup.LayoutParams.WRAP_CONTENT,
-                    ).apply { marginStart = dp(18) },
-                )
-            },
-            LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-            ),
-        )
+        val header = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            val side = panelEdgePadding()
+            setPadding(side, (side * 0.75f).toInt(), side, (side * 0.35f).toInt())
+            addView(
+                HostUi.chip(this@CarPlayHostActivity, "❯").apply {
+                    contentDescription = "Back to the host screen without saving"
+                    setOnClickListener { cancelSettingsEdits() }
+                },
+                LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                ).apply { marginEnd = dp(20) },
+            )
+            addView(
+                menuText("Settings", 32f, MENU_LABEL, bold = true),
+                LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                ),
+            )
+        }
+        settingsHeaderView = header
         content.addView(
             settingsCategoryHeader("Connection"),
             LinearLayout.LayoutParams(
@@ -1172,6 +1180,62 @@ class CarPlayHostActivity : ComponentActivity() {
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT,
             ).apply { topMargin = dp(6) },
+        )
+
+        content.addView(
+            settingsCategoryHeader("Diagnostics"),
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            ).apply { topMargin = dp(40) },
+        )
+        content.addView(
+            buildDebugLogsSection(),
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            ).apply { topMargin = dp(12) },
+        )
+        content.addView(
+            menuText(
+                "build ${BuildConfig.BUILD_ID}\nlog $sessionLogDestination",
+                15f,
+                MENU_SECONDARY,
+            ),
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            ),
+        )
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            content.addView(
+                settingsCategoryHeader("Android 9 compatibility"),
+                LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                ).apply { topMargin = dp(40) },
+            )
+            content.addView(
+                menuText(
+                    "Android 9: no Wi-Fi P2P (LocalOnlyHotspot instead), " +
+                        "no HEVC software decoder.",
+                    16f,
+                    MENU_SECONDARY,
+                ),
+                LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                ).apply { topMargin = dp(12) },
+            )
+        }
+
+        val preview = menuText("", 17f, MENU_SECONDARY)
+        content.addView(
+            preview,
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            ).apply { topMargin = dp(30) },
         )
 
         content.addView(
@@ -1525,67 +1589,6 @@ class CarPlayHostActivity : ComponentActivity() {
             ).apply { topMargin = dp(12) },
         )
 
-        content.addView(
-            settingsCategoryHeader("Diagnostics"),
-            LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-            ).apply { topMargin = dp(40) },
-        )
-        content.addView(
-            buildDebugLogsSection(),
-            LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-            ).apply { topMargin = dp(12) },
-        )
-        content.addView(
-            menuText("Build: ${BuildConfig.BUILD_ID}", 14f, MENU_SECONDARY),
-            LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-            ).apply { topMargin = dp(10) },
-        )
-        content.addView(
-            menuText("Log file: $sessionLogDestination", 14f, MENU_SECONDARY),
-            LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-            ).apply { topMargin = dp(10) },
-        )
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
-            content.addView(
-                settingsCategoryHeader("Android 9 compatibility"),
-                LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT,
-                ).apply { topMargin = dp(40) },
-            )
-            content.addView(
-                menuText(
-                    "The following settings are unavailable and hidden on Android 9 " +
-                        "(API 28):\n" +
-                        "• Wi-Fi P2P (5 GHz) — LocalOnlyHotspot is used instead.\n" +
-                        "• HEVC software decoder — hardware decoding is used instead.",
-                    16f,
-                    MENU_SECONDARY,
-                ),
-                LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT,
-                ).apply { topMargin = dp(12) },
-            )
-        }
-
-        val preview = menuText("", 17f, MENU_SECONDARY)
-        content.addView(
-            preview,
-            LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-            ).apply { topMargin = dp(30) },
-        )
-
         val save = HostUi.chip(this, "Save and reconnect", HostUi.ChipStyle.PRIMARY).apply {
             setOnClickListener { saveSettingsAndReconnect() }
         }
@@ -1624,25 +1627,19 @@ class CarPlayHostActivity : ComponentActivity() {
             )
         }
         panel.addView(
-            scroll,
-            FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT,
-                FrameLayout.LayoutParams.MATCH_PARENT,
+            header,
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
             ),
         )
         panel.addView(
-            HostUi.chip(this, "✕", HostUi.ChipStyle.NORMAL).apply {
-                contentDescription = "Discard changes and exit settings"
-                setOnClickListener { cancelSettingsEdits() }
-            },
-            FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-                Gravity.TOP or Gravity.END,
-            ).apply {
-                rightMargin = dp(20)
-                topMargin = dp(20)
-            },
+            scroll,
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                0,
+                1f,
+            ),
         )
         overlay.addView(
             panel,
@@ -1672,6 +1669,14 @@ class CarPlayHostActivity : ComponentActivity() {
             content.paddingBottom,
         )
         settingsContentView = content
+        settingsHeaderView?.let { header ->
+            settingsHeaderPadding = intArrayOf(
+                header.paddingLeft,
+                header.paddingTop,
+                header.paddingRight,
+                header.paddingBottom,
+            )
+        }
 
         resolutionValueView = resolutionValue
         resolutionPreviewView = preview
@@ -1745,12 +1750,11 @@ class CarPlayHostActivity : ComponentActivity() {
      * tagged footer buttons stay at the bottom, spanning both columns.
      */
     private fun splitSettingsMenuIntoColumns(content: LinearLayout) {
-        if (content.childCount < 4) return
+        if (content.childCount < 3) return
 
-        val title = content.getChildAt(0)
         val footer = mutableListOf<View>()
         val sections = mutableListOf<View>()
-        for (index in 1 until content.childCount) {
+        for (index in 0 until content.childCount) {
             val child = content.getChildAt(index)
             if (child.tag == MENU_FOOTER_TAG) footer.add(child) else sections.add(child)
         }
@@ -1789,7 +1793,6 @@ class CarPlayHostActivity : ComponentActivity() {
             group.forEach { column.addView(it) }
         }
 
-        content.addView(title)
         content.addView(
             LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
@@ -1958,7 +1961,7 @@ class CarPlayHostActivity : ComponentActivity() {
                 ),
             )
             addView(
-                menuText("Linux device path, for example /dev/i2c-1.", 14f, MENU_SECONDARY),
+                menuText("/dev/i2c-1", 14f, MENU_FAINT),
                 LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.WRAP_CONTENT,
@@ -2004,12 +2007,7 @@ class CarPlayHostActivity : ComponentActivity() {
                 ).apply { topMargin = dp(8) },
             )
             addView(
-                menuText(
-                    "Address must start with http:// or https://. Token is optional and sent " +
-                        "as an Authorization bearer token.",
-                    14f,
-                    MENU_SECONDARY,
-                ),
+                menuText("http(s):// · token optional (bearer)", 14f, MENU_FAINT),
                 LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.WRAP_CONTENT,
@@ -2184,9 +2182,9 @@ class CarPlayHostActivity : ComponentActivity() {
             )
             addView(
                 menuText(
-                    "Sends precise Android location as CarPlay GPS data when the iPhone requests it.",
+                    "Sent to the iPhone when it asks for a position.",
                     14f,
-                    MENU_SECONDARY,
+                    MENU_FAINT,
                 ),
                 LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
@@ -3251,8 +3249,11 @@ class CarPlayHostActivity : ComponentActivity() {
     private fun updateResolutionMenu() {
         resolutionValueView?.text = CarPlayDisplayScale.label(displayScaleTenths)
         val native = activeDisplaySize ?: currentActivitySize()
+        // Four short lines instead of the thirteen this used to be: the switches above already say
+        // whether location reporting and audio mapping are on, so the preview only carries what a
+        // log or a support question actually needs.
         val resolution = if (native == null) {
-            "Handshake resolution: waiting for display"
+            "waiting for the display"
         } else {
             val negotiated = CarPlayDisplayScale.apply(
                 AirPlayDisplayConfig(
@@ -3263,53 +3264,42 @@ class CarPlayHostActivity : ComponentActivity() {
                 ),
                 displayScaleTenths,
             )
-            "Handshake resolution: ${native.width} x ${native.height} -> " +
-                "${negotiated.widthPixels} x ${negotiated.heightPixels}"
+            "${native.width}x${native.height} -> " +
+                "${negotiated.widthPixels}x${negotiated.heightPixels}"
         }
         val transport = if (!hevcEnabled) {
             "H.264"
         } else {
-            "HEVC (H.265, ${if (hevcSoftwareDecoderEnabled) "software" else "hardware"})"
-        }
-        val fullscreen = buildString {
-            append(if (hideTopBar) "top hidden" else "top shown")
-            append(", ")
-            append(if (hideBottomBar) "bottom hidden" else "bottom shown")
+            "HEVC ${if (hevcSoftwareDecoderEnabled) "sw" else "hw"}"
         }
         resolutionPreviewView?.text = buildString {
-            append(resolution).append('\n')
-            append("Identity: ").append(normalizedManufacturer()).append(" / ")
-                .append(normalizedModel()).append('\n')
-            append("OEM label: ").append(oemLabel.ifBlank { "(empty)" }).append('\n')
-            append("Frame rate: ").append(fps).append(" fps\n")
-            append("Detected maximum: ")
-                .append(maximumDetectedWidthPixels).append(" x ")
-                .append(maximumDetectedHeightPixels).append(" px\n")
-            append("Physical reference: ")
+            append(resolution).append(" @ ").append(fps).append(" fps · ").append(transport)
+            append('\n')
+            append("identity ").append(normalizedManufacturer()).append(" / ")
+                .append(normalizedModel())
+                .append(" · oem ").append(oemLabel.ifBlank { "-" })
+            append('\n')
+            append(widthPhysicalMm).append(" mm ")
                 .append(
                     when (physicalSizeBasis) {
-                        AirPlayPhysicalSizeBasis.WIDTH -> "widest width"
-                        AirPlayPhysicalSizeBasis.HEIGHT -> "longest height"
+                        AirPlayPhysicalSizeBasis.WIDTH -> "widest"
+                        AirPlayPhysicalSizeBasis.HEIGHT -> "longest"
                     },
                 )
-                .append(" = ").append(widthPhysicalMm).append(" mm\n")
+                .append(" · driving ").append(if (rightHandDrive) "right" else "left")
+                .append(" · ")
+                .append(if (hideTopBar) "top hidden" else "top shown")
+                .append(", ")
+                .append(if (hideBottomBar) "bottom hidden" else "bottom shown")
+            append('\n')
+            append("max ").append(maximumDetectedWidthPixels).append("x")
+                .append(maximumDetectedHeightPixels)
             native?.let { size ->
                 val physical = resolvePhysicalSize(size)
-                append("CarPlay physical size: ")
-                    .append(physical.widthMm).append(" x ")
-                    .append(physical.heightMm).append(" mm\n")
+                append(" · carplay ").append(physical.widthMm).append("x")
+                    .append(physical.heightMm).append(" mm")
             }
-            append("Driving side: ").append(if (rightHandDrive) "right" else "left").append('\n')
-            append("Fullscreen: ").append(fullscreen).append('\n')
-            append("Video transport: ").append(transport).append('\n')
-            append("Location reporting: ")
-                .append(if (locationReportingEnabled) "enabled" else "disabled")
-                .append('\n')
-            if (advancedAudioChannelMappingSupported) {
-                append("Audio channel mapping: ")
-                    .append(if (advancedAudioChannelMapping) "AAOS buses" else "Mobile compatible")
-                    .append('\n')
-            }
+            append('\n')
             append(safeAreaSummary())
         }
     }
