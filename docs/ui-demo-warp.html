@@ -4,6 +4,21 @@
 <meta charset="utf-8">
 <meta name="color-scheme" content="dark">
 <title>xcertplay · Warp 终端风格 UI 提案</title>
+<!--
+  重新渲染某一屏（macOS）：
+    "Google Chrome" --headless --use-mock-keychain \
+      --user-data-dir="$(mktemp -d)/p" --hide-scrollbars \
+      --window-size=2560,1600 --screenshot=out.png \
+      "file://$PWD/docs/ui-demo-warp.html?only=1"
+
+  三条踩过的坑：
+    · 不要覆盖 HOME。Chrome 通过它定位登录钥匙串，HOME 指向临时目录时它会报
+      「找不到 chrome 钥匙串」。
+    · --use-mock-keychain 免掉 "Chrome Safe Storage" 的钥匙串请求——那个请求
+      就是会弹权限框的东西。
+    · Chrome 154 在两种 headless 模式下截完图都不会自己退出，所以以「文件出现」
+      为准，之后 kill 掉进程。
+-->
 <style>
   /* ===========================================================================
      xcertplay · Warp 终端风格 UI 提案
