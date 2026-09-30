@@ -195,9 +195,18 @@ class CarPlayController(
     @Volatile private var mux: Iap2UsbMuxHost? = null
     @Volatile private var csm: Iap2Session? = null
     @Volatile private var activeSession: AirPlaySession? = null
-    @Volatile private var hotspot: WirelessHotspotManager? = null
-    @Volatile private var hotspotInfo: WirelessHotspotInfo? = null
-    @Volatile private var hotspotSignature: String? = null
+    @Volatile private var hotspot: LiveWirelessHotspot? = null
+    private val hotspotLock = Any()
+
+    /**
+     * Set before a settings-driven teardown starts.
+     *
+     * That teardown bumps the wireless generation, so the bring-up thread parked in the control
+     * client wakes up, sees a stale run and tears the wireless stack down itself. Both teardowns
+     * run at the same time, and whichever arrives first owns the hotspot: without this flag the
+     * racing one would remove the very group that has to survive the reset.
+     */
+    @Volatile private var retainHotspotForNextHandshake = false
     @Volatile private var bonjour: CarPlayBonjour? = null
     @Volatile private var bluetoothSocket: BluetoothSocket? = null
     @Volatile private var bluetoothStream: BluetoothRfcommDuplexStream? = null
@@ -443,6 +452,8 @@ class CarPlayController(
      * is removed before a new one is started.
      */
     fun close(retainWirelessHotspot: Boolean) {
+        // Set before the generation bump below wakes the bring-up thread into its own teardown.
+        if (retainWirelessHotspot) retainHotspotForNextHandshake = true
         synchronized(this) {
             if (closed) return
             closed = true
@@ -1541,9 +1552,9 @@ class CarPlayController(
                     "address=${retained.info.hostAddress?.hostAddress ?: "unknown"} " +
                     "channel=${retained.info.channel}",
             )
-            hotspot = retained.manager
-            hotspotInfo = retained.info
-            hotspotSignature = signature
+            synchronized(hotspotLock) {
+                hotspot = LiveWirelessHotspot(signature, retained.manager, retained.info)
+            }
             return retained.info
         }
         val manager: WirelessHotspotManager = when (hotspotMode) {
@@ -1566,21 +1577,17 @@ class CarPlayController(
                 security = config.manualHotspotSecurity,
             )
         }
-        hotspot = manager
-        hotspotSignature = signature
+        val live = LiveWirelessHotspot(signature, manager)
+        synchronized(hotspotLock) { hotspot = live }
         val timeoutMillis = if (hotspotMode == WirelessHotspotMode.WIFI_P2P) {
             WIFI_P2P_START_TIMEOUT_MILLIS
         } else {
             HOTSPOT_START_TIMEOUT_MILLIS
         }
         return try {
-            manager.start(timeoutMillis).also { hotspotInfo = it }
+            manager.start(timeoutMillis).also { live.info = it }
         } catch (failure: Exception) {
-            if (hotspot === manager) {
-                hotspot = null
-                hotspotInfo = null
-                hotspotSignature = null
-            }
+            synchronized(hotspotLock) { if (hotspot === live) hotspot = null }
             closeBestEffort(hotspotMode.name) { manager.close() }
             if (isStaleWirelessRun(generation)) throw failure
             throw IOException(
@@ -1718,10 +1725,13 @@ class CarPlayController(
      * Releases the wireless stack. With [retainHotspot] a live hotspot is handed to
      * [WirelessHotspotRetention] instead of being removed - that is the whole point of a
      * settings-driven reset, which must leave the phone associated to the group it already uses.
+     *
+     * The default follows the controller's own decision, because a stale bring-up thread tears the
+     * stack down on its own and must make the same choice as the thread that asked for the reset.
      */
     private fun closeWirelessStack(
         service: CarPlayVpnService? = vpnService,
-        retainHotspot: Boolean = false,
+        retainHotspot: Boolean = retainHotspotForNextHandshake,
     ) {
         media.setIapTunnelHandler(null)
         val activeTunnel = wirelessTunnelChannel
@@ -1734,27 +1744,25 @@ class CarPlayController(
         bonjour = null
         if (activeBonjour != null) closeBestEffort("Bonjour") { activeBonjour.close() }
 
-        val activeHotspot = hotspot
-        val activeHotspotInfo = hotspotInfo
-        val activeHotspotSignature = hotspotSignature
-        hotspot = null
-        hotspotInfo = null
-        hotspotSignature = null
+        val live = synchronized(hotspotLock) { hotspot.also { hotspot = null } }
+        val liveInfo = live?.info
         when {
-            activeHotspot == null -> Unit
-            retainHotspot && activeHotspotInfo != null && activeHotspotSignature != null -> {
+            live == null -> Unit
+            retainHotspot && liveInfo != null -> {
                 debugLog(
-                    "wireless hotspot kept alive for the next handshake ssid=${activeHotspotInfo.ssid} " +
-                        "address=${activeHotspotInfo.hostAddress?.hostAddress ?: "unknown"} " +
-                        "channel=${activeHotspotInfo.channel}",
+                    "wireless hotspot kept alive for the next handshake ssid=${liveInfo.ssid} " +
+                        "address=${liveInfo.hostAddress?.hostAddress ?: "unknown"} " +
+                        "channel=${liveInfo.channel}",
                 )
-                WirelessHotspotRetention.shared.retain(
-                    signature = activeHotspotSignature,
-                    manager = activeHotspot,
-                    info = activeHotspotInfo,
-                )
+                WirelessHotspotRetention.shared.retain(live.signature, live.manager, liveInfo)
             }
-            else -> closeBestEffort("wireless hotspot") { activeHotspot.close() }
+            else -> {
+                debugLog(
+                    "wireless hotspot removed with this handshake " +
+                        "retain=$retainHotspot started=${liveInfo != null}",
+                )
+                closeBestEffort("wireless hotspot") { live.manager.close() }
+            }
         }
         wirelessIdentification = null
         wirelessAirPlayEndpoint = null
@@ -2038,6 +2046,17 @@ class CarPlayController(
         is CarPlayStatus.Failed ->
             "ERROR $message"
     }
+
+    /**
+     * One live hotspot with the identity the next controller has to match. The manager, that
+     * identity and the details the phone was told about travel as one object, so a teardown running
+     * on another thread can never read half of them.
+     */
+    private class LiveWirelessHotspot(
+        val signature: String,
+        val manager: WirelessHotspotManager,
+        @Volatile var info: WirelessHotspotInfo? = null,
+    )
 
     companion object {
         /**
