@@ -1,0 +1,573 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="color-scheme" content="dark">
+<title>xcertplay · 面板式设置页 提案</title>
+<!--
+  重新渲染某一屏（macOS）：
+
+    "Google Chrome" --headless --use-mock-keychain \
+      --user-data-dir="$(mktemp -d)/p" --hide-scrollbars \
+      --window-size=2560,1600 --screenshot=out.png \
+      "file://$PWD/docs/ui-demo-panel.html?only=1"
+
+  三条踩过的坑（与 ui-demo-warp.html 一致）：
+    · 不要覆盖 HOME。Chrome 通过它定位登录钥匙串，HOME 指向临时目录时它会报
+      「找不到 chrome 钥匙串」。
+    · --use-mock-keychain 免掉 "Chrome Safe Storage" 的钥匙串请求——那个请求
+      就是会弹权限框的东西。
+    · Chrome 154 在两种 headless 模式下截完图都不会自己退出，所以以「文件出现」
+      为准，之后 kill 掉进程。
+
+  本页回答一个问题：设置页能不能不再是「全屏、把画面挡死、开一次就断一次会话」，
+  而是盖在仍在运行的画面上？下面三屏是同一套设置内容的三种几何排布。
+-->
+<style>
+  /* ===========================================================================
+     沿用 ui-demo-warp.html 的设计语言：平面代替玻璃 · 等宽代替无衬线 ·
+     细线代替投影 · 文字状态代替彩色控件。
+     画布 2560×1600（车机原生分辨率），下列尺寸均为画布 px。
+     =========================================================================== */
+  :root{
+    --bg:#0b0d0e;
+    --surface:#101314;
+    --surface-2:#171a1c;
+    --surface-3:#1e2225;
+    --line:#23272a;
+    --line-2:#31363a;
+    --text:#e6e9e9;
+    --dim:#8b9398;
+    --faint:#5c6469;
+    --ok:#7fcd9a;
+    --ok-dim:#3f6b52;
+    --warn:#e3b341;
+    --err:#e5534b;
+    --panel:rgba(16,19,20,.94);
+    --mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,"JetBrains Mono",
+           "PingFang SC","Helvetica Neue",monospace;
+  }
+  body.light{
+    --bg:#f1eee6; --surface:#fbf9f4; --surface-2:#f0ece2; --surface-3:#ffffff;
+    --line:#e1dcd1; --line-2:#cfc7b8; --text:#1d1c19; --dim:#6b665c; --faint:#8a8474;
+    --ok:#2f7d52; --ok-dim:#9cc5ac; --warn:#9a6b12; --err:#c0392b;
+    --panel:rgba(251,249,244,.95);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{background:#060708}
+  body{font-family:var(--mono);color:var(--text);-webkit-font-smoothing:antialiased}
+  body.light{background:var(--bg)}
+
+  .screen{position:relative;width:2560px;height:1600px;overflow:hidden;
+          background:var(--bg);font-size:22px;line-height:1.42}
+  #stack{display:block}
+
+  /* ---------- CarPlay 画面（示意，包在面板后面继续存在） ---------- */
+  .cp{position:absolute;inset:0;background:
+        repeating-linear-gradient(58deg,rgba(255,255,255,.028) 0 2px,transparent 2px 74px),
+        radial-gradient(120% 90% at 22% 6%,#151a20 0%,#0a0c0e 55%,#070809 100%)}
+  .cp-side{position:absolute;left:0;top:0;bottom:0;width:186px;
+           border-right:1px solid rgba(255,255,255,.07);background:rgba(255,255,255,.02)}
+  .cp-side i{display:block;width:96px;height:96px;margin:34px auto;border-radius:14px;
+             border:1px solid rgba(255,255,255,.10);background:rgba(255,255,255,.03)}
+  .cp-side i.on{border-color:rgba(127,205,154,.45);background:rgba(127,205,154,.10)}
+  .cp-top{position:absolute;left:186px;right:0;top:0;height:96px;display:flex;align-items:center;
+          gap:26px;padding:0 40px;color:rgba(255,255,255,.55);font-size:26px}
+  .cp-top .t{color:rgba(255,255,255,.86);font-size:32px}
+  .cp-top .r{margin-left:auto;display:flex;gap:26px}
+  .cp-grid{position:absolute;left:266px;top:150px;display:grid;
+           grid-template-columns:repeat(4,300px);gap:56px 64px}
+  .cp-app{height:300px;border-radius:20px;border:1px solid rgba(255,255,255,.09);
+          background:linear-gradient(160deg,rgba(255,255,255,.07),rgba(255,255,255,.015));
+          display:flex;align-items:center;justify-content:center;color:rgba(255,255,255,.62);
+          font-size:64px}
+  .cp-app span{position:absolute;margin-top:230px;font-size:21px;color:rgba(255,255,255,.5)}
+  .cp-app{position:relative}
+  .cp-pill{position:absolute;right:40px;bottom:34px;display:flex;gap:18px;align-items:center;
+           height:64px;padding:0 24px;border:1px solid rgba(255,255,255,.13);border-radius:10px;
+           background:rgba(8,9,10,.66);color:rgba(255,255,255,.72);font-size:21px}
+  .cp-pill b{color:var(--ok);font-weight:600}
+
+  /* ---------- 标注（看画面哪里被挡住） ---------- */
+  .zone{position:absolute;border:1px dashed rgba(255,255,255,.20);border-radius:8px;pointer-events:none}
+  .zone .cap{position:absolute;padding:8px 14px;font-size:18px;color:var(--dim);
+             background:rgba(8,9,10,.78);border:1px solid var(--line);border-radius:6px}
+
+  /* ---------- 面板本身 ---------- */
+  .panel{position:absolute;background:var(--panel);display:flex;flex-direction:column;
+         border:1px solid var(--line)}
+  .panel.right{right:0;top:0;bottom:0;width:940px;border-right:0;border-top:0;border-bottom:0}
+  .panel.bottom{left:0;right:0;bottom:0;border-left:0;border-right:0;border-bottom:0}
+  .panel.float{left:50%;transform:translateX(-50%);top:130px;width:1660px;height:1200px;
+               border-radius:14px;
+               background:rgba(16,19,20,.86);
+               backdrop-filter:blur(30px) saturate(150%);
+               -webkit-backdrop-filter:blur(30px) saturate(150%)}
+  .ph{display:flex;align-items:center;gap:16px;height:96px;padding:0 30px;
+      border-bottom:1px solid var(--line);flex:none}
+  .ph .back{display:inline-flex;align-items:center;justify-content:center;width:64px;height:56px;
+            border:1px solid var(--line-2);border-radius:8px;background:var(--surface-2);
+            color:var(--dim);font-size:24px}
+  .ph .title{font-size:30px;color:var(--text);white-space:nowrap;flex:none}
+  .ph .sub{font-size:20px;color:var(--faint);white-space:nowrap;min-width:0;
+           overflow:hidden;text-overflow:ellipsis}
+  .ph .live{margin-left:auto;flex:none;white-space:nowrap;display:flex;gap:10px;align-items:center;height:48px;padding:0 18px;
+            border:1px solid var(--ok-dim);border-radius:8px;color:var(--ok);font-size:20px;
+            background:rgba(127,205,154,.08)}
+  .grip{height:34px;display:flex;align-items:center;justify-content:center;flex:none}
+  .grip i{width:120px;height:6px;border-radius:3px;background:var(--line-2)}
+
+  .pbody{flex:1;overflow:hidden;padding:0 30px}
+  .cols{display:flex;gap:30px;padding-top:26px;align-items:flex-start}
+  .col{flex:1;min-width:0}
+  .block{border:1px solid var(--line);border-radius:10px;background:var(--surface);overflow:hidden;
+         margin-bottom:24px}
+  .block>.bh{display:flex;align-items:center;gap:14px;height:56px;padding:0 24px;
+             border-bottom:1px solid var(--line);color:var(--faint);font-size:17px;
+             letter-spacing:2.6px;text-transform:uppercase}
+  .block>.bh .tail{margin-left:auto;letter-spacing:0;text-transform:none;font-size:18px}
+  .row{padding:22px 24px;border-bottom:1px solid var(--line)}
+  .row:last-child{border-bottom:0}
+  .row .top{display:flex;align-items:center;gap:18px}
+  .row .label{font-size:25px;color:var(--text)}
+  .row .val{margin-left:auto;font-size:26px;color:var(--ok);font-weight:700}
+  .row .hint{font-size:18px;color:var(--faint);margin-top:6px}
+  .tog{display:inline-flex;align-items:center;justify-content:center;min-width:104px;height:50px;
+       padding:0 16px;border:1px solid var(--line-2);border-radius:8px;background:var(--surface-2);
+       color:var(--dim);font-size:20px}
+  .tog.on{border-color:var(--ok-dim);background:rgba(127,205,154,.10);color:var(--ok)}
+  .seg{display:flex;gap:10px}
+  .track{display:flex;gap:5px;height:18px;align-items:stretch;margin-top:14px}
+  .track i{flex:1;background:var(--line-2);border-radius:2px}
+  .track i.on{background:var(--ok)}
+  .ticks{display:flex;justify-content:space-between;margin-top:8px;font-size:17px;color:var(--faint)}
+  .kv{display:flex;align-items:baseline;gap:14px;padding:10px 0;font-size:20px}
+  .kv .k{color:var(--faint);min-width:150px}
+  .kv .v{color:var(--text)}
+  .kv .v.a{color:var(--ok)}
+
+  .pf{display:flex;align-items:center;gap:16px;padding:22px 30px;border-top:1px solid var(--line);
+      background:var(--surface);flex:none}
+  .pf .hint{font-size:19px;color:var(--faint)}
+  .pf .r{margin-left:auto;display:flex;gap:14px}
+  .btn{display:inline-flex;align-items:center;justify-content:center;height:62px;padding:0 26px;
+       border:1px solid var(--line-2);border-radius:9px;background:var(--surface-2);
+       color:var(--text);font-size:23px}
+  .btn.primary{border-color:var(--ok-dim);background:rgba(127,205,154,.12);color:var(--ok)}
+  .btn.danger{border-color:rgba(229,83,75,.45);color:var(--err);background:rgba(229,83,75,.06)}
+
+  /* ---------- 规范条（总览视图可见） ---------- */
+  .spec{width:100%;max-width:2560px;margin:0 auto;padding:60px 72px 10px;
+        border-bottom:1px solid var(--line);background:#060708}
+  body.light .spec{background:var(--bg)}
+  .spec h1{font-size:44px;font-weight:700;letter-spacing:-.6px}
+  .spec h1 span{color:var(--ok)}
+  .spec .lead{margin-top:14px;font-size:21px;color:var(--dim);max-width:1560px;line-height:1.6}
+  .spec .cols3{display:grid;grid-template-columns:repeat(3,1fr);gap:34px;margin:40px 0 8px}
+  .spec h2{font-size:17px;letter-spacing:2.6px;text-transform:uppercase;color:var(--faint);
+           margin-bottom:14px}
+  .spec ul{list-style:none;font-size:20px;color:var(--dim);line-height:1.8}
+  .spec ul li::before{content:"· ";color:var(--faint)}
+  .spec .good{color:var(--ok)}
+  .spec .bad{color:var(--err)}
+  body.single .spec{display:none}
+</style>
+</head>
+<body>
+
+<header class="spec">
+  <h1>xcertplay · <span>面板式设置页</span> 提案</h1>
+  <div class="lead">
+    今天呼出设置 = 关掉整个 controller：画面立刻断、手机掉一次 CarPlay、返回时再重连一次。
+    已经改成「设置盖在运行中的会话上」，但面板仍是不透明的全屏——画面在跑却看不见。
+    下面三屏是同一套设置内容的三种几何排布，共同前提是：<b>会话不断、画面继续解码</b>，
+    面板只遮住一部分，让你在调设置时仍看得见导航/音乐。
+  </div>
+  <div class="cols3">
+    <div>
+      <h2>三种排布</h2>
+      <ul>
+        <li>屏 1 右栏 940px：最像车机原生设置；左侧导航区完整保留</li>
+        <li>屏 2 底部抽屉 720px：上方画面最宽，像 Android Auto 的下拉抽屉</li>
+        <li>屏 3 居中浮层（半透明 + 模糊）：四周都能看见画面，但遮住画面正中</li>
+      </ul>
+    </div>
+    <div>
+      <h2>交互规则（三屏一致）</h2>
+      <ul>
+        <li>面板打开时触摸只给面板，不进 CarPlay</li>
+        <li>三指双击 / 返回键 / 左上 ❯ 都是「返回」：丢弃改动，画面从未中断</li>
+        <li>只有「保存并重连」重建会话，并保留 Wi-Fi 组，手机几秒回到同一地址</li>
+        <li>顶部常驻一行会话心跳：<span class="good">● 运行中 · 地址 · 编码 · 分辨率</span></li>
+        <li>退出应用仍在面板底部，红色描边，不放主操作旁边</li>
+      </ul>
+    </div>
+    <div>
+      <h2>取舍</h2>
+      <ul>
+        <li>面板越透明越贵：模糊要每帧重算，车机 GPU 不一定吃得消 → 建议默认不透明右栏，模糊版做成可选项</li>
+        <li>右栏会遮住 CarPlay 右侧图标；底部抽屉遮住下方一行</li>
+        <li>面板内滚动区与固定底栏分离，避免「保存」被滚出屏幕</li>
+        <li>窄面板放不下一行两项，所以列数由宽度决定（≥1400 两列，否则一列）</li>
+      </ul>
+    </div>
+  </div>
+</header>
+
+<main id="stack">
+
+<!-- ===================== 1. 右栏面板（推荐） ===================== -->
+<section class="screen" id="s1">
+  <div class="cp">
+    <div class="cp-side"><i class="on"></i><i></i><i></i></div>
+    <div class="cp-top"><span class="t">14:32</span><span>周五 9月30日</span>
+      <span class="r"><span>5G</span><span>▮▮▮▯</span><span>38%</span></span></div>
+    <div class="cp-grid">
+      <div class="cp-app">◎<span>地图</span></div>
+      <div class="cp-app">♪<span>音乐</span></div>
+      <div class="cp-app">☎<span>电话</span></div>
+      <div class="cp-app">▤<span>播客</span></div>
+      <div class="cp-app">✉<span>信息</span></div>
+      <div class="cp-app">▶<span>现在播放</span></div>
+      <div class="cp-app">⌂<span>主页</span></div>
+      <div class="cp-app">≡<span>更多</span></div>
+    </div>
+    <div class="cp-pill">HEVC 2560×1440 · 60fps · <b>8.4 Mbps</b> · 触控 2 帧延迟</div>
+  </div>
+
+  <!-- 被面板压住的部分（设计标注） -->
+  <div class="zone" style="right:0;top:0;bottom:0;width:940px;border-radius:0;border-right:0;
+       border-top:0;border-bottom:0;background:rgba(127,205,154,.05)">
+    <div class="cap" style="left:-320px;top:24px">面板区 940 × 1600</div>
+  </div>
+  <div class="zone" style="left:186px;top:96px;width:1400px;bottom:0;border:0">
+    <div class="cap" style="left:20px;bottom:110px">CarPlay 继续绘制 —— 不被暂停、不重建会话</div>
+  </div>
+
+  <div class="panel right">
+    <div class="ph">
+      <span class="back">❯</span>
+      <span class="title">设置</span>
+      <span class="sub">/ 显示与视频</span>
+      <span class="live">● 运行中 · 192.168.65.223 · HEVC 2560×1440</span>
+    </div>
+    <div class="grip"><i></i></div>
+
+    <div class="pbody">
+      <div class="block">
+        <div class="bh">display &amp; video<span class="tail">4 项</span></div>
+        <div class="row">
+          <div class="top"><span class="label">分辨率 · scale</span><span class="val">1.0x</span></div>
+          <div class="track"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i>
+            <i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i></i><i></i>
+            <i></i><i></i><i></i><i></i><i></i><i></i></div>
+          <div class="ticks"><span>0.3x</span><span>0.6x</span><span>1.0x</span></div>
+          <div class="hint">改变后需要重新与 iPhone 协商画面</div>
+        </div>
+        <div class="row">
+          <div class="top"><span class="label">帧率</span><span class="val">60 fps</span></div>
+          <div class="track"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i>
+            <i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i>
+            <i class="on"></i><i class="on"></i><i class="on"></i><i></i></div>
+          <div class="ticks"><span>30</span><span>45</span><span>60</span></div>
+        </div>
+        <div class="row">
+          <div class="top"><span class="label">HEVC (H.265)</span>
+            <span class="tog on" style="margin-left:auto">[ ON ]</span></div>
+          <div class="hint">关闭后回落到 H.264，码率更高</div>
+        </div>
+        <div class="row">
+          <div class="top"><span class="label">安全区</span><span class="val" style="font-size:22px">24/24/96/24</span></div>
+          <div class="top" style="margin-top:12px;gap:10px"><span class="tog">编辑</span><span class="tog">重置</span>
+            <span class="hint" style="margin:0 0 0 6px">左/上/右/下 px</span></div>
+        </div>
+      </div>
+
+      <div class="block">
+        <div class="bh">wireless<span class="tail">Wi-Fi P2P · 5 GHz</span></div>
+        <div class="row">
+          <div class="top"><span class="label">无线 CarPlay</span>
+            <span class="tog on" style="margin-left:auto">[ ON ]</span></div>
+          <div class="kv" style="padding-bottom:0"><span class="k">热点</span><span class="v a">192.168.65.223</span></div>
+          <div class="kv"><span class="k">信道</span><span class="v">36 · 5180 MHz</span></div>
+        </div>
+      </div>
+
+      <div class="block">
+        <div class="bh">audio<span class="tail">PCM + Opus · 双向</span></div>
+        <div class="row">
+          <div class="top"><span class="label">麦克风</span>
+            <span class="tog on" style="margin-left:auto">[ ON ]</span></div>
+          <div class="top" style="margin-top:14px"><span class="label">增益</span><span class="val">1.0x</span></div>
+        </div>
+        <div class="row">
+          <div class="top"><span class="label">声道路由</span>
+            <span class="seg" style="margin-left:auto"><span class="tog on">标准</span><span class="tog">高级</span></span></div>
+        </div>
+      </div>
+
+      <div class="block">
+        <div class="bh">diagnostics<span class="tail">最近 4 行</span></div>
+        <div class="row" style="padding:18px 24px">
+          <div class="hint" style="font-size:18px;line-height:1.8;color:var(--dim)">
+            14:32:07 <span style="color:var(--ok)">hotspot kept alive</span><br>
+            14:32:13 <span style="color:var(--dim)">AirPlay session active</span><br>
+            14:32:19 <span style="color:var(--faint)">screen stream active type=110</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="pf">
+      <span class="hint">三指双击 / 返回键 = 返回，画面不受影响</span>
+      <span class="r">
+        <span class="btn danger">退出应用</span>
+        <span class="btn primary">保存并重连</span>
+      </span>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== 2. 底部抽屉 ===================== -->
+<section class="screen" id="s2">
+  <div class="cp">
+    <div class="cp-side"><i class="on"></i><i></i><i></i></div>
+    <div class="cp-top"><span class="t">14:32</span><span>周五 9月30日</span>
+      <span class="r"><span>5G</span><span>▮▮▮▯</span><span>38%</span></span></div>
+    <div class="cp-grid">
+      <div class="cp-app">◎<span>地图</span></div>
+      <div class="cp-app">♪<span>音乐</span></div>
+      <div class="cp-app">☎<span>电话</span></div>
+      <div class="cp-app">▤<span>播客</span></div>
+      <div class="cp-app">✉<span>信息</span></div>
+      <div class="cp-app">▶<span>现在播放</span></div>
+      <div class="cp-app">⌂<span>主页</span></div>
+      <div class="cp-app">≡<span>更多</span></div>
+    </div>
+    <div class="cp-pill">HEVC 2560×1440 · 60fps · <b>8.4 Mbps</b> · 触控 2 帧延迟</div>
+  </div>
+
+  <div class="zone" style="left:0;right:0;bottom:0;height:700px;border-radius:0;border-left:0;
+       border-right:0;border-bottom:0;background:rgba(127,205,154,.05)">
+    <div class="cap" style="left:20px;bottom:900px">抽屉区 2560 × 内容高度（约 44% 屏高）</div>
+  </div>
+  <div class="zone" style="left:0;right:0;top:0;height:880px;border:0">
+    <div class="cap" style="left:50%;transform:translateX(-50%);top:700px">
+      画面最宽的一种：图标行、导航地图主体都留着
+    </div>
+  </div>
+
+  <div class="panel bottom">
+    <div class="grip" style="height:44px"><i></i></div>
+    <div class="ph" style="height:86px">
+      <span class="back">❯</span>
+      <span class="title">设置</span>
+      <span class="sub">/ 两列 · 固定底栏</span>
+      <span class="live">● 运行中 · 192.168.65.223 · HEVC 2560×1440 · 60fps</span>
+    </div>
+
+    <div class="pbody">
+      <div class="cols">
+        <div class="col">
+          <div class="block">
+            <div class="bh">display &amp; video<span class="tail">4 项</span></div>
+            <div class="row">
+              <div class="top"><span class="label">分辨率 · scale</span><span class="val">1.0x</span></div>
+              <div class="track"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i>
+                <i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i></i><i></i>
+                <i></i><i></i><i></i><i></i><i></i><i></i></div>
+            </div>
+            <div class="row">
+              <div class="top"><span class="label">帧率</span><span class="val">60 fps</span></div>
+              <div class="track"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i>
+                <i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i>
+                <i class="on"></i><i class="on"></i><i class="on"></i><i></i></div>
+            </div>
+            <div class="row">
+              <div class="top"><span class="label">HEVC (H.265)</span>
+                <span class="tog on" style="margin-left:auto">[ ON ]</span></div>
+              <div class="hint">关闭后回落到 H.264，码率更高</div>
+            </div>
+          </div>
+        </div>
+        <div class="col">
+          <div class="block">
+            <div class="bh">wireless<span class="tail">Wi-Fi P2P · 5 GHz</span></div>
+            <div class="row">
+              <div class="top"><span class="label">无线 CarPlay</span>
+                <span class="tog on" style="margin-left:auto">[ ON ]</span></div>
+              <div class="kv" style="padding-bottom:0"><span class="k">热点</span><span class="v a">192.168.65.223</span></div>
+              <div class="kv"><span class="k">信道</span><span class="v">36 · 5180 MHz</span></div>
+              <div class="kv"><span class="k">手机</span><span class="v">已关联 · 192.168.65.208</span></div>
+            </div>
+            <div class="row">
+              <div class="top"><span class="label">MFi 通道</span>
+                <span class="seg" style="margin-left:auto">
+                  <span class="tog on">USB/CH341</span><span class="tog">I2C</span><span class="tog">Remote</span>
+                </span></div>
+            </div>
+          </div>
+          <div class="block">
+            <div class="bh">diagnostics<span class="tail">最近 4 行</span></div>
+            <div class="row" style="padding:18px 24px">
+              <div class="hint" style="font-size:18px;line-height:1.8;color:var(--dim)">
+                14:32:07 <span style="color:var(--ok)">wireless hotspot kept alive</span><br>
+                14:32:13 <span style="color:var(--dim)">AirPlay session active · 192.168.65.208</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="pf">
+      <span class="hint">三指双击 / 返回键 = 返回 · 只有保存会重建会话</span>
+      <span class="r">
+        <span class="btn danger">退出应用</span>
+        <span class="btn primary">保存并重连</span>
+      </span>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== 3. 居中浮层（半透明 + 模糊） ===================== -->
+<section class="screen" id="s3">
+  <div class="cp">
+    <div class="cp-side"><i class="on"></i><i></i><i></i></div>
+    <div class="cp-top"><span class="t">14:32</span><span>周五 9月30日</span>
+      <span class="r"><span>5G</span><span>▮▮▮▯</span><span>38%</span></span></div>
+    <div class="cp-grid">
+      <div class="cp-app">◎<span>地图</span></div>
+      <div class="cp-app">♪<span>音乐</span></div>
+      <div class="cp-app">☎<span>电话</span></div>
+      <div class="cp-app">▤<span>播客</span></div>
+      <div class="cp-app">✉<span>信息</span></div>
+      <div class="cp-app">▶<span>现在播放</span></div>
+      <div class="cp-app">⌂<span>主页</span></div>
+      <div class="cp-app">≡<span>更多</span></div>
+    </div>
+    <div class="cp-pill">HEVC 2560×1440 · 60fps · <b>8.4 Mbps</b> · 触控 2 帧延迟</div>
+  </div>
+
+  <div class="zone" style="left:50%;transform:translateX(-50%);top:110px;width:1660px;height:1320px;
+       border-radius:14px;background:rgba(127,205,154,.045)">
+    <div class="cap" style="left:20px;top:-58px">浮层 1660 × 1200 · 四周各留 450 / 130 px</div>
+  </div>
+  <div class="zone" style="left:186px;top:96px;width:1440px;height:1180px;border:0">
+    <div class="cap" style="left:20px;top:300px">左侧导航区仍在视野里</div>
+  </div>
+
+  <div class="panel float">
+    <div class="ph">
+      <span class="back">❯</span>
+      <span class="title">设置</span>
+      <span class="sub">/ 半透明 · 需要 GPU 每帧重算模糊</span>
+      <span class="live">● 运行中 · 192.168.65.223 · HEVC 2560×1440 · 60fps</span>
+    </div>
+
+    <div class="pbody">
+      <div class="cols">
+        <div class="col">
+          <div class="block">
+            <div class="bh">display &amp; video<span class="tail">4 项</span></div>
+            <div class="row">
+              <div class="top"><span class="label">分辨率 · scale</span><span class="val">1.0x</span></div>
+              <div class="track"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i>
+                <i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i></i><i></i>
+                <i></i><i></i><i></i><i></i><i></i><i></i></div>
+              <div class="ticks"><span>0.3x</span><span>0.6x</span><span>1.0x</span></div>
+            </div>
+            <div class="row">
+              <div class="top"><span class="label">帧率</span><span class="val">60 fps</span></div>
+              <div class="track"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i>
+                <i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i>
+                <i class="on"></i><i class="on"></i><i class="on"></i><i></i></div>
+            </div>
+            <div class="row">
+              <div class="top"><span class="label">HEVC (H.265)</span>
+                <span class="tog on" style="margin-left:auto">[ ON ]</span></div>
+              <div class="hint">关闭后回落到 H.264，码率更高</div>
+            </div>
+            <div class="row">
+              <div class="top"><span class="label">安全区</span><span class="val" style="font-size:22px">24/24/96/24</span></div>
+              <div class="top" style="margin-top:12px;gap:10px"><span class="tog">编辑</span><span class="tog">重置</span></div>
+            </div>
+          </div>
+          <div class="block">
+            <div class="bh">audio<span class="tail">PCM + Opus · 双向</span></div>
+            <div class="row">
+              <div class="top"><span class="label">麦克风</span>
+                <span class="tog on" style="margin-left:auto">[ ON ]</span></div>
+              <div class="top" style="margin-top:14px"><span class="label">增益</span><span class="val">1.0x</span></div>
+              <div class="track"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i>
+                <i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i></i>
+                <i></i><i></i><i></i><i></i><i></i><i></i></div>
+            </div>
+          </div>
+        </div>
+        <div class="col">
+          <div class="block">
+            <div class="bh">wireless<span class="tail">Wi-Fi P2P · 5 GHz</span></div>
+            <div class="row">
+              <div class="top"><span class="label">无线 CarPlay</span>
+                <span class="tog on" style="margin-left:auto">[ ON ]</span></div>
+              <div class="kv" style="padding-bottom:0"><span class="k">热点</span><span class="v a">192.168.65.223</span></div>
+              <div class="kv"><span class="k">信道</span><span class="v">36 · 5180 MHz</span></div>
+            </div>
+            <div class="row">
+              <div class="top"><span class="label">MFi 通道</span>
+                <span class="seg" style="margin-left:auto">
+                  <span class="tog on">USB/CH341</span><span class="tog">I2C</span><span class="tog">Remote</span>
+                </span></div>
+            </div>
+          </div>
+          <div class="block">
+            <div class="bh">diagnostics<span class="tail">最近 5 行</span></div>
+            <div class="row" style="padding:20px 24px">
+              <div class="hint" style="font-size:19px;line-height:1.8;color:var(--dim)">
+                14:32:07 <span style="color:var(--ok)">wireless hotspot kept alive</span><br>
+                14:32:09 <span style="color:var(--ok)">wireless reusing the hotspot</span><br>
+                14:32:13 <span style="color:var(--dim)">AirPlay session active · 192.168.65.208</span><br>
+                14:32:19 <span style="color:var(--faint)">screen stream active type=110</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="pf">
+      <span class="hint">三指双击 = 返回（与返回键一致）· 浮层遮住画面正中，导航时慎用</span>
+      <span class="r">
+        <span class="btn danger">退出应用</span>
+        <span class="btn primary">保存并重连</span>
+      </span>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<script>
+  // ?only=N 只渲染第 N 屏（用于逐屏截图）；总览视图自动缩放到窗口宽度
+  const params = new URLSearchParams(location.search);
+  if (params.get('theme') === 'light') document.body.classList.add('light');
+  const only = params.get('only');
+  if (only) {
+    document.body.classList.add('single');
+    document.querySelectorAll('.screen').forEach(s => { if (s.id !== 's' + only) s.remove(); });
+  } else {
+    const stack = document.getElementById('stack');
+    const fit = () => {
+      const scale = Math.min(1, (window.innerWidth - 48) / 2560);
+      stack.style.zoom = scale;
+      stack.style.width = '2560px';
+      stack.style.margin = '0 auto';
+      stack.style.padding = '0 0 48px';
+    };
+    fit();
+    addEventListener('resize', fit);
+  }
+</script>
+</body>
+</html>
