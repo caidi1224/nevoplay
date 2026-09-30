@@ -838,6 +838,9 @@ class CarPlayHostActivity : ComponentActivity() {
      */
     private fun applyTheme(rebuildViews: Boolean) {
         HostUi.useDarkTheme(darkMode)
+        // The root's background was set once, when the content view was built; without this the
+        // picture area keeps the old theme's colour while everything on top of it changes.
+        contentRoot?.setBackgroundColor(MENU_BACKGROUND)
         applySystemBarPalette()
         if (rebuildViews) {
             val root = contentRoot as? ViewGroup ?: return
