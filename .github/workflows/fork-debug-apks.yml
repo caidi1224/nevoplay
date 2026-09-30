@@ -13,6 +13,9 @@ on:
   push:
     branches:
       - "**"
+  # Lets a build be started without pushing a commit, which is how the signing
+  # secrets get exercised after they change.
+  workflow_dispatch:
   workflow_dispatch:
 
 permissions:
