@@ -248,6 +248,7 @@ class CarPlayHostActivity : ComponentActivity() {
     private var settingsContentPadding: IntArray? = null
     private var settingsContentView: View? = null
     private var settingsHeaderView: View? = null
+    private var settingsLiveView: TextView? = null
     private var settingsHeaderPadding: IntArray? = null
     private var settingsMenu: View? = null
 
@@ -1110,8 +1111,13 @@ class CarPlayHostActivity : ComponentActivity() {
     }
 
     private fun buildSettingsMenu(): View {
+        val column = settingsPanelOnTheRight()
+        val panelWidth = settingsPanelWidth(resources.displayMetrics.widthPixels)
+        val side = settingsPanelEdgePadding(panelWidth)
         val overlay = FrameLayout(this).apply {
-            setBackgroundColor(MENU_BACKGROUND)
+            // The picture keeps decoding behind this overlay. A full-screen backdrop would hide it,
+            // so the surface belongs to the panel and the rest of the screen stays see-through.
+            setBackgroundColor(if (column) Color.TRANSPARENT else MENU_BACKGROUND)
             isClickable = true
         }
         // Header above, scrolling column below: the back control stays where the hand expects it
@@ -1120,15 +1126,14 @@ class CarPlayHostActivity : ComponentActivity() {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(MENU_BACKGROUND)
         }
-        // One child list, two jobs: category blocks and the tagged footer stay in the column (the
-        // landscape splitter walks exactly these), while everything else lands inside the block the
-        // last category opened. Rows therefore keep no margins of their own - the block separates
-        // them with a hairline instead.
+        // One child list, two jobs: category headers stay in the column, while every row added after
+        // one lands inside that category's block. Rows therefore keep no margins of their own - the
+        // block separates them with a hairline instead.
         val content = object : LinearLayout(this) {
             override fun addView(child: View?, index: Int, params: ViewGroup.LayoutParams?) {
                 val view = child ?: return
                 val block = settingsBlock
-                if (block != null && view.tag != MENU_FOOTER_TAG && view !is HostBlock) {
+                if (block != null && view !is HostBlock) {
                     block.addRow(view)
                 } else {
                     super.addView(view, index, params)
@@ -1142,13 +1147,11 @@ class CarPlayHostActivity : ComponentActivity() {
         }.apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
-            val side = panelEdgePadding()
-            setPadding(side, (side * 0.35f).toInt(), side, side)
+            setPadding(side, (side * 0.75f).toInt(), side, side)
         }
         val header = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            val side = panelEdgePadding()
             setPadding(side, (side * 0.75f).toInt(), side, (side * 0.35f).toInt())
             addView(
                 HostUi.chip(this@CarPlayHostActivity, "❯").apply {
@@ -1168,6 +1171,19 @@ class CarPlayHostActivity : ComponentActivity() {
                     ViewGroup.LayoutParams.WRAP_CONTENT,
                     ViewGroup.LayoutParams.WRAP_CONTENT,
                 ),
+            )
+            // The one line that shows the picture behind the panel is still a running session.
+            val live = menuText("", 18f, MENU_SECONDARY).apply {
+                maxLines = 1
+                ellipsize = TextUtils.TruncateAt.END
+            }
+            settingsLiveView = live
+            addView(
+                live,
+                LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+                    gravity = Gravity.END
+                    marginStart = dp(16)
+                },
             )
         }
         settingsHeaderView = header
@@ -1656,32 +1672,40 @@ class CarPlayHostActivity : ComponentActivity() {
             ).apply { topMargin = dp(12) },
         )
 
+        // The footer is pinned to the panel instead of living in the scrolling column: "Save and
+        // reconnect" must not be something the user has to scroll to find.
         val save = HostUi.chip(this, "Save and reconnect", HostUi.ChipStyle.PRIMARY).apply {
             setOnClickListener { saveSettingsAndReconnect() }
         }
         val exitApplicationButton = HostUi.chip(this, "Exit application", HostUi.ChipStyle.DANGER).apply {
             setOnClickListener { exitApplication() }
         }
-        content.addView(
-            LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                tag = MENU_FOOTER_TAG
-                addView(
-                    save,
-                    LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
-                )
-                addView(
-                    exitApplicationButton,
-                    LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
-                        marginStart = dp(12)
-                    },
-                )
-            },
-            LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-            ).apply { topMargin = dp(32) },
-        )
+        val footer = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setBackgroundColor(MENU_BACKGROUND)
+            setPadding(side, dp(18), side, dp(18))
+            addView(
+                menuText("3-finger double tap or Back = return", 17f, MENU_FAINT).apply {
+                    maxLines = 2
+                },
+                LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
+            )
+            addView(
+                exitApplicationButton,
+                LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                ).apply { marginStart = dp(16) },
+            )
+            addView(
+                save,
+                LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                ).apply { marginStart = dp(12) },
+            )
+        }
 
         val scroll = ScrollView(this).apply {
             isFillViewport = true
@@ -1708,14 +1732,37 @@ class CarPlayHostActivity : ComponentActivity() {
                 1f,
             ),
         )
+        panel.addView(
+            footer,
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            ),
+        )
         overlay.addView(
             panel,
             FrameLayout.LayoutParams(
-                settingsPanelWidth(resources.displayMetrics.widthPixels),
+                panelWidth,
                 FrameLayout.LayoutParams.MATCH_PARENT,
-                Gravity.CENTER,
+                if (column) Gravity.END else Gravity.CENTER,
             ),
         )
+        // A hairline where the panel meets the picture: in dark mode both are nearly the same
+        // near-black, and without it the two run together.
+        val divider = if (column) {
+            View(this).apply { setBackgroundColor(HostUi.LINE) }.also { view ->
+                overlay.addView(
+                    view,
+                    FrameLayout.LayoutParams(
+                        dp(1),
+                        FrameLayout.LayoutParams.MATCH_PARENT,
+                        Gravity.END,
+                    ).apply { rightMargin = panelWidth },
+                )
+            }
+        } else {
+            null
+        }
         overlay.addOnLayoutChangeListener { view, _, _, _, _, _, _, _, _ ->
             val desiredWidth = settingsPanelWidth(view.width)
             val params = panel.layoutParams
@@ -1723,11 +1770,13 @@ class CarPlayHostActivity : ComponentActivity() {
                 params.width = desiredWidth
                 panel.layoutParams = params
             }
+            val dividerParams = divider?.layoutParams as? FrameLayout.LayoutParams
+            if (dividerParams != null && dividerParams.rightMargin != desiredWidth) {
+                dividerParams.rightMargin = desiredWidth
+                divider.layoutParams = dividerParams
+            }
         }
 
-        if (settingsMenuIsLandscape()) {
-            splitSettingsMenuIntoColumns(content)
-        }
         overlay.applyHostScale(menuTextScale(), menuSpaceScale())
         settingsContentPadding = intArrayOf(
             content.paddingLeft,
@@ -1754,22 +1803,31 @@ class CarPlayHostActivity : ComponentActivity() {
     }
 
     /**
-     * The settings panel is only usable as a full-height single column on narrow screens. Wide
-     * landscape head units get a much wider panel with two columns of categories, so the rows stay
-     * reachable without scrolling through a narrow strip.
+     * The settings are a right-hand column over the running picture on a head unit: the picture
+     * stays visible to the left of it, and opening the menu never stops it. A phone, or a head unit
+     * in portrait, has no room for that column, so there the panel keeps the centred full-height
+     * layout and its opaque backdrop.
      */
-    private fun settingsMenuIsLandscape(): Boolean {
+    private fun settingsPanelOnTheRight(): Boolean {
         val metrics = resources.displayMetrics
-        return metrics.widthPixels >= LANDSCAPE_SETTINGS_MIN_WIDTH_PX &&
+        return metrics.widthPixels >= RIGHT_COLUMN_SETTINGS_MIN_WIDTH_PX &&
             metrics.widthPixels > metrics.heightPixels
     }
 
     private fun settingsPanelWidth(availableWidth: Int): Int =
-        if (settingsMenuIsLandscape()) {
-            minOf((availableWidth * LANDSCAPE_SETTINGS_WIDTH_FRACTION).toInt(), MAX_SETTINGS_MENU_WIDTH_LANDSCAPE_PX)
+        if (settingsPanelOnTheRight()) {
+            minOf(
+                (availableWidth * SETTINGS_PANEL_WIDTH_FRACTION).toInt(),
+                MAX_SETTINGS_PANEL_WIDTH_PX,
+            )
         } else {
             minOf(availableWidth, MAX_SETTINGS_MENU_WIDTH_PX)
         }
+
+    /** Side padding inside the panel: a fraction of the panel, floored and capped so it stays sane. */
+    private fun settingsPanelEdgePadding(panelWidth: Int): Int =
+        (panelWidth * SETTINGS_PANEL_EDGE_FRACTION).toInt()
+            .coerceIn(dp(16), dp(MAX_SETTINGS_PANEL_EDGE_DP))
 
     /**
      * One factor for the whole panel, derived from its width in dp rather than in pixels: a head
@@ -1810,87 +1868,6 @@ class CarPlayHostActivity : ComponentActivity() {
 
     private fun homeSpaceScale(): Float =
         hostSpaceScale(resources.displayMetrics.widthPixels)
-
-    /**
-     * Re-flow the rows that [buildSettingsMenu] appended as one column into two balanced columns,
-     * keeping every category header with the rows that follow it. The title stays on top and the
-     * tagged footer buttons stay at the bottom, spanning both columns.
-     */
-    private fun splitSettingsMenuIntoColumns(content: LinearLayout) {
-        if (content.childCount < 3) return
-
-        val footer = mutableListOf<View>()
-        val sections = mutableListOf<View>()
-        for (index in 0 until content.childCount) {
-            val child = content.getChildAt(index)
-            if (child.tag == MENU_FOOTER_TAG) footer.add(child) else sections.add(child)
-        }
-
-        val groups = mutableListOf<MutableList<View>>()
-        for (view in sections) {
-            if (groups.isEmpty() || view.tag == MENU_CATEGORY_TAG) groups.add(mutableListOf())
-            groups.last().add(view)
-        }
-        if (groups.size < 2) return
-
-        // Split between categories so each column keeps document order, choosing the boundary whose
-        // estimated heights are closest to equal (one column would otherwise take both big groups).
-        val weights = groups.map { group -> group.sumOf { menuGroupWeight(it) } }
-        val total = weights.sum()
-        var splitIndex = 1
-        var bestDifference = Int.MAX_VALUE
-        var prefixWeight = 0
-        for (index in 0 until groups.size - 1) {
-            prefixWeight += weights[index]
-            val difference = Math.abs(total - 2 * prefixWeight)
-            if (difference < bestDifference) {
-                bestDifference = difference
-                splitIndex = index + 1
-            }
-        }
-
-        content.removeAllViews()
-
-        val columns = listOf(
-            LinearLayout(this).apply { orientation = LinearLayout.VERTICAL },
-            LinearLayout(this).apply { orientation = LinearLayout.VERTICAL },
-        )
-        for ((index, group) in groups.withIndex()) {
-            val column = if (index < splitIndex) columns[0] else columns[1]
-            group.forEach { column.addView(it) }
-        }
-
-        content.addView(
-            LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                addView(
-                    columns[0],
-                    LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
-                )
-                addView(
-                    columns[1],
-                    LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-                        .apply { marginStart = dp(SETTINGS_COLUMN_GAP_DP) },
-                )
-            },
-            LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-            ),
-        )
-        footer.forEach { content.addView(it) }
-    }
-
-    /** Rough height estimate for column balancing: every nested row counts as one unit. */
-    private fun menuGroupWeight(view: View): Int {
-        var weight = 1
-        if (view is ViewGroup) {
-            for (index in 0 until view.childCount) {
-                weight += menuGroupWeight(view.getChildAt(index))
-            }
-        }
-        return weight
-    }
 
     private fun persistMenuSettings() {
         AirPlayPersistence.saveWirelessEnabled(this, wirelessEnabled)
@@ -2180,7 +2157,6 @@ class CarPlayHostActivity : ComponentActivity() {
      */
     private fun settingsCategoryHeader(title: String): HostBlock =
         HostBlock(this, title).apply {
-            tag = MENU_CATEGORY_TAG
             settingsBlock = this
         }
 
@@ -3220,6 +3196,7 @@ class CarPlayHostActivity : ComponentActivity() {
                 band = status.band,
                 channel = status.channel,
                 backend = status.backend,
+                address = status.address,
             )
             CarPlayStatus.WaitingForPairedIphone ->
                 hotspotStatus.copy(state = "Waiting for paired iPhone")
@@ -3237,7 +3214,38 @@ class CarPlayHostActivity : ComponentActivity() {
         updateHotspotStatusBlock()
     }
 
+    /**
+     * The line in the settings header that says the picture behind the panel is a live session: the
+     * address the phone is associated with, and what it is being sent. It is the only evidence on
+     * screen that opening the menu did not interrupt anything.
+     */
+    private fun updateSettingsLiveChip() {
+        val view = settingsLiveView ?: return
+        val running = activeAirPlaySession != null
+        val parts = mutableListOf(if (running) "running" else hotspotStatus.state.lowercase())
+        hotspotStatus.address?.let { parts.add(it) }
+        val transport = if (hevcEnabled) "HEVC" else "H.264"
+        val native = activeDisplaySize
+        if (native == null) {
+            parts.add(transport)
+        } else {
+            val negotiated = CarPlayDisplayScale.apply(
+                AirPlayDisplayConfig(
+                    widthPixels = native.width,
+                    heightPixels = native.height,
+                    widthPhysicalMm = widthPhysicalMm,
+                    fps = fps,
+                ),
+                displayScaleTenths,
+            )
+            parts.add("$transport ${negotiated.widthPixels}\u00d7${negotiated.heightPixels}")
+        }
+        view.text = "${if (running) "\u25cf" else "\u25cb"} ${parts.joinToString(" \u00b7 ")}"
+        view.setTextColor(if (running) MENU_ACCENT else MENU_FAINT)
+    }
+
     private fun updateHotspotStatusBlock() {
+        updateSettingsLiveChip()
         updateIdlePanel()
         if (!wirelessEnabled) {
             hotspotStatusView?.text = "Wireless hotspot: off"
@@ -3340,6 +3348,7 @@ class CarPlayHostActivity : ComponentActivity() {
         } else {
             "HEVC ${if (hevcSoftwareDecoderEnabled) "sw" else "hw"}"
         }
+        updateSettingsLiveChip()
         resolutionPreviewView?.text = buildString {
             append(resolution).append(" @ ").append(fps).append(" fps · ").append(transport)
             append('\n')
@@ -3591,6 +3600,7 @@ class CarPlayHostActivity : ComponentActivity() {
                         return@runOnUiThread
                     }
                     activeAirPlaySession = session
+                    updateSettingsLiveChip()
                     syncAirPlayDarkMode()
                     if (menuOpen) return@runOnUiThread
                     appendLog("AirPlay session active")
@@ -3600,6 +3610,7 @@ class CarPlayHostActivity : ComponentActivity() {
             override fun onSessionEnded(session: AirPlaySession) {
                 runOnUiThread {
                     if (activeAirPlaySession === session) activeAirPlaySession = null
+                    updateSettingsLiveChip()
                     if (menuOpen || controllerGeneration != restartGeneration) {
                         return@runOnUiThread
                     }
@@ -4649,12 +4660,17 @@ class CarPlayHostActivity : ComponentActivity() {
         const val IDLE_TITLE_HEIGHT_FRACTION = 0.055f
         const val IDLE_TITLE_WIDTH_FRACTION = 0.06f
         const val MAX_SETTINGS_MENU_WIDTH_PX = 1200
-        const val MAX_SETTINGS_MENU_WIDTH_LANDSCAPE_PX = 2600
-        const val LANDSCAPE_SETTINGS_MIN_WIDTH_PX = 1600
-        const val LANDSCAPE_SETTINGS_WIDTH_FRACTION = 0.96f
-        const val SETTINGS_COLUMN_GAP_DP = 48
-        const val MENU_CATEGORY_TAG = "settings-category"
-        const val MENU_FOOTER_TAG = "settings-footer"
+
+        /** The settings column: about a third of a head unit's width, capped in pixels. */
+        const val SETTINGS_PANEL_WIDTH_FRACTION = 0.37f
+        const val MAX_SETTINGS_PANEL_WIDTH_PX = 1000
+
+        /** Below this width, or in portrait, there is no room for a column beside the picture. */
+        const val RIGHT_COLUMN_SETTINGS_MIN_WIDTH_PX = 1600
+
+        /** Padding inside the panel, measured against the panel and not against the screen. */
+        const val SETTINGS_PANEL_EDGE_FRACTION = 0.04f
+        const val MAX_SETTINGS_PANEL_EDGE_DP = 40
         // Read through the palette on every access: the dark and light sets are swapped at runtime,
         // and a `val` here would freeze whichever one was active when the class loaded.
         val MENU_BACKGROUND: Int get() = HostUi.BG
@@ -4681,6 +4697,7 @@ class CarPlayHostActivity : ComponentActivity() {
         val band: String? = null,
         val channel: Int? = null,
         val backend: String? = null,
+        val address: String? = null,
     )
 }
 
