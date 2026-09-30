@@ -93,6 +93,22 @@ back on its own.**
 
    Once a commit is pushed, use `git revert`, not `reset`/`--force`.
 
+### Undoing pushed work in practice
+
+`git revert <sha>` is right for one commit. A *chain* of reverts usually
+conflicts here, because every commit also bumps `libs.versions.toml` and they
+then fight over that one file. To step back to an older state, restore the files
+that matter and commit forward:
+
+```bash
+git tag -f before-<change> HEAD          # keep the state you are leaving
+git checkout <old-sha> -- path/to/file   # and rm files that did not exist then
+```
+
+The restored state still needs a **new** version number: a value that has
+already been built cannot be reused, so returning to the 1.3.1.20 interface
+shipped as 1.3.1.35, not 1.3.1.20.
+
 ### Messages
 
 Match the existing history style — a short imperative subject, lowercase type
@@ -159,6 +175,28 @@ CI runs on JDK 25 with Android SDK `platforms;android-37.0`,
   --stacktrace
 ```
 
+### Verify locally before pushing (mandatory)
+
+Compile before you push. This session spent four CI builds and four version
+numbers on mistakes a local compile catches in under a second: a typo from a
+blind text replacement (`ssdp`), a field name copied from a different project
+(`receivedNs` where this fork has `receivedUs`), and a call site passing an
+`apply {}` receiver where a `Context` was expected. Pushing is for recording a
+verified change and for the tests CI owns - not for finding out whether the code
+compiles.
+
+```bash
+source ~/.dsh/xcertplay-signing.env   # fork key, so the APK is installable
+./gradlew :mobile:assembleDebug       # seconds -> mobile/build/outputs/apk/debug/
+```
+
+If a build fails on a duplicated class (`FooKt 2.class`), the incremental
+outputs are stale - usually after restoring files with `git checkout`:
+
+```bash
+./gradlew :common:clean :mobile:clean
+```
+
 ### Local toolchain on this machine
 
 Installed so changes can be compiled **before** pushing - CI is slow and a
@@ -208,6 +246,12 @@ Debug APKs land in `mobile/build/outputs/apk/debug/` and
 `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`); without them, build the debug
 variants.
 
+The fork builds through `.github/workflows/fork-debug-apks.yml`, whose artifact
+is `fork-debug-apks`. It runs on every push and on demand. `workflow_dispatch` is
+already declared there - adding it a second time creates a duplicate key in the
+same mapping, which GitHub rejects outright: the run fails before any job starts
+and produces no log to read.
+
 `org.gradle.configuration-cache=true` is enabled project-wide — if a task
 misbehaves with the configuration cache, prove it with
 `--no-configuration-cache` before changing that setting.
@@ -239,4 +283,8 @@ falls back to:
 - 提交信息沿用现有风格：`feat:`、`fix(scope):`、`opti:`、`chore:`、`update README.md`，版本号提交直接写 `1.3.0`。
 - **每交付一个改动，版本号末尾的小版本号 +1**（`1.3.1` → `1.3.1.1` → `1.3.1.2`…），不重复使用已经构建过的值；合并上游后以新的三段版本为基准重新从 `.1` 开始。两个数字集中在 `gradle/libs.versions.toml`（`xcertplayVersionName` / `xcertplayVersionCode`），mobile 与 automotive 都从那里读取，不会各写一份。
 - 每个构建还带 `BuildConfig.BUILD_ID`（提交号 `[+run<CI运行号>]`）：写在会话日志**首行**，也显示在 设置 → 诊断 里——这是判断“车上装的是哪一版、日志出自哪一版”的依据。
+- **推送前必须先本地编译验证**（JDK 25 与 Android SDK 已装好，见上文）：改代码 → `./gradlew :mobile:assembleDebug` 出包秒级完成 → 再推送。CI 只负责单元测试与留档产物，不用来“发现编译不过”。若报重复类（`FooKt 2.class`），是增量产物陈旧（常见于用 `git checkout` 恢复过文件），执行 `./gradlew :common:clean :mobile:clean` 即可。
+- **撤销已推送的改动**：单个提交用 `git revert <sha>`；但**连续 revert 多个提交通常会冲突**，因为每个提交都改了 `libs.versions.toml`。要退回旧状态就用 `git checkout <旧提交> -- <文件>` 恢复文件后向前提交，并且**仍要使用一个全新的版本号**（已构建过的值不能复用：退回 1.3.1.20 的界面是以 1.3.1.35 发布的）。动手前先 `git tag -f before-<改动> HEAD` 留个后路。
+- **签名密钥**：本机 `~/.dsh/xcertplay-fork.jks`（600）+ `~/.dsh/xcertplay-signing.env`；GitHub secrets 里的副本**读不回来**，密钥丢了只能轮换，代价是每台车卸载重装一次。当前证书指纹 `744abb75…85405e`。
+- **CI 工作流**：`.github/workflows/fork-debug-apks.yml`（产物 `fork-debug-apks`），`workflow_dispatch` 已存在，**不要再加一次** —— 重复键会让 GitHub 直接拒绝整个工作流，且那次运行没有日志可看。
 - 提交前先看 `git status`：不要提交 `build/`、APK、keystore、`local.properties`、日志等生成物或本地状态。
