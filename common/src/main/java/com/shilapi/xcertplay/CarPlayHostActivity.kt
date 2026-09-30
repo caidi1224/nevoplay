@@ -362,8 +362,12 @@ class CarPlayHostActivity : ComponentActivity() {
     private var darkMode = false
     private var activeAirPlaySession: AirPlaySession? = null
     private val activeScreenStreamTypes = mutableSetOf<Int>()
-    private var handshakeResetInProgress = false
-    private var startAfterHandshakeReset = false
+
+    /** The window size the running controller negotiated, to notice a resize that happened unseen. */
+    private var controllerDisplaySize: DisplaySize? = null
+
+    /** True from the moment a rebuild starts until its new controller is running. */
+    private var stackRebuildInProgress = false
     private var restartGeneration = 0
     private var reconnectScheduled = false
     private var sessionLog: SessionLogFile? = null
@@ -1966,7 +1970,8 @@ class CarPlayHostActivity : ComponentActivity() {
         }
         settingsBaseline = null
         locationPermissionAvailable = hasFineLocationPermission()
-        hotspotStatus = HotspotStatus(state = if (wirelessEnabled) "stopped" else "off")
+        // The hotspot is not part of the settings any more: the session keeps running behind the
+        // menu, so its state is whatever the controller last reported, not "stopped".
         syncMfiSettingsControls()
         syncMicrophoneGainControls()
         updateManualHotspotFields()
@@ -2432,7 +2437,7 @@ class CarPlayHostActivity : ComponentActivity() {
     }
 
     private fun startMicrophoneGainTest() {
-        if (!menuOpen || handshakeResetInProgress || microphoneLevelMonitor != null) return
+        if (!menuOpen || stackRebuildInProgress || microphoneLevelMonitor != null) return
         if (!microphoneAvailable) {
             microphoneGainTestAfterPermission = true
             microphoneLevelValueView?.text = "Permission required"
@@ -2458,7 +2463,7 @@ class CarPlayHostActivity : ComponentActivity() {
                     if (microphoneLevelMonitor !== monitor) return@runOnUiThread
                     microphoneLevelMonitor = null
                     microphoneTestButton?.text = "Test"
-                    microphoneTestButton?.isEnabled = menuOpen && !handshakeResetInProgress
+                    microphoneTestButton?.isEnabled = menuOpen && !stackRebuildInProgress
                     if (error != null) {
                         Log.e(TAG, "microphone gain test failed", error)
                         microphoneLevelBar?.progress = 0
@@ -3665,6 +3670,7 @@ class CarPlayHostActivity : ComponentActivity() {
         sink = snapshot.sink
         if (snapshot.width > 0 && snapshot.height > 0) {
             activeDisplaySize = DisplaySize(snapshot.width, snapshot.height)
+            controllerDisplaySize = activeDisplaySize
         }
         val generation = restartGeneration
         snapshot.controller.attachUi(
@@ -3695,8 +3701,9 @@ class CarPlayHostActivity : ComponentActivity() {
     }
 
     private fun startCarPlay(size: DisplaySize) {
-        if (shuttingDown.get() || menuOpen || handshakeResetInProgress || controller != null) return
+        if (shuttingDown.get() || menuOpen || stackRebuildInProgress || controller != null) return
         val controllerGeneration = restartGeneration
+        controllerDisplaySize = size
         val config = createRuntimeConfig()
         val airPlayConfig = createAirPlayConfig(size)
         val locationProvider: Iap2LocationProvider? =
@@ -3831,9 +3838,12 @@ class CarPlayHostActivity : ComponentActivity() {
         if (previous == null) {
             appendLog("Display detected: ${size.width}x${size.height}")
             maybeStartCarPlay()
-        } else if (menuOpen || handshakeResetInProgress) {
+        } else if (menuOpen || stackRebuildInProgress) {
+            // The menu covers the picture, and a rebuild is already under way: record it only. The
+            // menu's exit path renegotiates if the window it went in with is not the window it comes
+            // out of.
             appendLog(
-                "Display updated while handshake is reset: " +
+                "Display updated out of sight: " +
                     "${previous.width}x${previous.height} -> ${size.width}x${size.height}",
             )
         } else {
@@ -3863,7 +3873,7 @@ class CarPlayHostActivity : ComponentActivity() {
             !microphonePermissionResolved ||
             shuttingDown.get() ||
             menuOpen ||
-            handshakeResetInProgress ||
+            stackRebuildInProgress ||
             controller != null
         ) {
             return
@@ -3872,7 +3882,7 @@ class CarPlayHostActivity : ComponentActivity() {
     }
 
     private fun reconnectAfterLoss(reason: String) {
-        if (shuttingDown.get() || menuOpen || handshakeResetInProgress) return
+        if (shuttingDown.get() || menuOpen || stackRebuildInProgress) return
         if (reconnectScheduled) return
         reconnectScheduled = true
         val generation = restartGeneration
@@ -3888,7 +3898,7 @@ class CarPlayHostActivity : ComponentActivity() {
                 if (
                     shuttingDown.get() ||
                     menuOpen ||
-                    handshakeResetInProgress ||
+                    stackRebuildInProgress ||
                     generation != restartGeneration
                 ) {
                     return@postDelayed
@@ -3899,14 +3909,22 @@ class CarPlayHostActivity : ComponentActivity() {
         )
     }
 
-    /** Full-stack fallback when an AirPlay-only reconnect is unavailable. */
-    private fun restartCarPlay(reason: String) {
-        if (shuttingDown.get() || menuOpen || handshakeResetInProgress) return
+    /**
+     * Rebuilds the whole stack.
+     *
+     * [retainHotspot] hands the Wi-Fi group the iPhone is associated with to the new controller, so
+     * a settings-driven reconnect comes back on the address the phone already knows instead of
+     * making it re-associate. It is only useful while this host stays wireless, where the same
+     * group will be taken over again.
+     */
+    private fun restartCarPlay(reason: String, retainHotspot: Boolean = false) {
+        if (shuttingDown.get() || menuOpen || stackRebuildInProgress) return
         val size = activeDisplaySize ?: return
         appendLog(reason)
         activeScreenStreamTypes.clear()
         setConnectionStage(reason)
         Log.i(TAG, "$reason; rebuilding stack at ${size.width}x${size.height}")
+        stackRebuildInProgress = true
         val generation = ++restartGeneration
         val oldController = controller
         val oldSink = sink
@@ -3914,65 +3932,37 @@ class CarPlayHostActivity : ComponentActivity() {
         controller = null
         sink = null
         teardownExecutor.execute {
-            oldController?.close()
+            oldController?.close(retainWirelessHotspot = retainHotspot)
             oldController?.awaitClosed(CONTROLLER_CLOSE_TIMEOUT_MILLIS)
             oldSink?.close()
             runOnUiThread {
-                if (!shuttingDown.get() && generation == restartGeneration) startCarPlay(size)
+                if (shuttingDown.get() || generation != restartGeneration) return@runOnUiThread
+                stackRebuildInProgress = false
+                startCarPlay(size)
             }
         }
     }
 
+    /**
+     * Opens the settings overlay **over** a running session.
+     *
+     * Nothing here touches the controller: the picture keeps decoding behind the menu, the phone
+     * keeps its association, and a look at the settings costs nothing. Only "Save & Reconnect"
+     * starts a new handshake - the AirPlay listener carries the resolution, the codec and the MFi
+     * channel, so those are the settings that need one.
+     */
     private fun openSettingsMenu() {
         if (menuOpen || shuttingDown.get()) return
         stopMicrophoneGainTest()
         settingsBaseline = captureSettingsBaseline()
         menuOpen = true
-        handshakeResetInProgress = true
-        startAfterHandshakeReset = false
-        hotspotStatus = HotspotStatus(state = if (wirelessEnabled) "stopped" else "off")
-        updateHotspotStatusBlock()
-        val generation = ++restartGeneration
-        controller?.sendTouch(emptyList())
-        val oldController = controller
-        val oldSink = sink
-        CarPlayBackgroundSession.clear(oldController)
-        controller = null
-        sink = null
-        activeScreenStreamTypes.clear()
-        setConnectionStage("Reconnecting after settings")
         gestureOverlay?.visibility = View.GONE
         settingsMenu?.visibility = View.VISIBLE
         syncMicrophoneGainControls()
-        microphoneTestButton?.isEnabled = false
         updateDebugOverlays()
         clearScreenLogs()
-        appendLog("Settings opened; CarPlay handshake reset")
+        appendLog("Settings opened over the running session")
         updateResolutionMenu()
-        teardownExecutor.execute {
-            try {
-                // Keep the Wi-Fi hotspot: the iPhone is associated with that group, and the fresh
-                // handshake after the menu hands the same group back so the phone keeps its address.
-                oldController?.close(retainWirelessHotspot = true)
-                oldController?.awaitClosed(CONTROLLER_CLOSE_TIMEOUT_MILLIS)
-            } finally {
-                try {
-                    oldSink?.close()
-                } finally {
-                    runOnUiThread {
-                        if (shuttingDown.get() || generation != restartGeneration) {
-                            return@runOnUiThread
-                        }
-                        handshakeResetInProgress = false
-                        microphoneTestButton?.isEnabled = menuOpen
-                        if (!menuOpen && startAfterHandshakeReset) {
-                            startAfterHandshakeReset = false
-                            maybeStartCarPlay()
-                        }
-                    }
-                }
-            }
-        }
     }
 
     private fun saveSettingsAndReconnect() {
@@ -3981,16 +3971,33 @@ class CarPlayHostActivity : ComponentActivity() {
         if (!validateManualHotspotSettings()) return
         persistMenuSettings()
         settingsBaseline = null
-        finishSettingsMenu("Settings saved")
+        closeSettingsMenu(
+            "Settings saved; re-establishing the handshake at " +
+                "${CarPlayDisplayScale.label(displayScaleTenths)} with " +
+                (if (hevcEnabled) "HEVC (H.265)" else "H.264") +
+                ", MFI ${mfiTargetLabel(mfiTarget)}" +
+                ", Wi-Fi session ${hotspotModeLabel(wirelessHotspotMode)}",
+        )
+        restartCarPlay(
+            "Reconnecting after settings",
+            retainHotspot = wirelessEnabled,
+        )
     }
 
+    /**
+     * Leaving the menu without saving: the settings never reached the session, so there is nothing
+     * to reconnect for - the picture that has been running behind the menu simply stays.
+     */
     private fun cancelSettingsEdits() {
         if (!menuOpen) return
         restoreSettingsBaseline()
-        finishSettingsMenu("Settings changes discarded")
+        closeSettingsMenu("Settings changes discarded; the running session was left alone")
+        // A session that died while the menu was open has no reconnection scheduled - the retry path
+        // is deliberately quiet while the menu covers the screen - so pick it up here.
+        resumeCarPlayAfterSettings()
     }
 
-    private fun finishSettingsMenu(prefix: String) {
+    private fun closeSettingsMenu(prefix: String) {
         if (!menuOpen) return
         stopMicrophoneGainTest()
         menuOpen = false
@@ -3998,17 +4005,33 @@ class CarPlayHostActivity : ComponentActivity() {
         gestureOverlay?.visibility = View.VISIBLE
         updateDebugOverlays()
         clearScreenLogs()
-        appendLog(
-            "$prefix; starting a fresh handshake at " +
-                "${CarPlayDisplayScale.label(displayScaleTenths)} with " +
-                (if (hevcEnabled) "HEVC (H.265)" else "H.264") +
-                ", MFI ${mfiTargetLabel(mfiTarget)}" +
-                ", Wi-Fi session ${hotspotModeLabel(wirelessHotspotMode)}",
-        )
-        if (handshakeResetInProgress) {
-            startAfterHandshakeReset = true
-        } else {
+        appendLog(prefix)
+    }
+
+    /**
+     * Brings the session that ran behind the menu back into shape after an unsaved exit, without
+     * touching it when nothing happened to it: a session that died while the menu covered the screen
+     * has no reconnection scheduled, and a window that changed size behind it still runs at the old
+     * one.
+     */
+    private fun resumeCarPlayAfterSettings() {
+        if (shuttingDown.get()) return
+        if (controller == null) {
+            // Either nothing was running yet or a rebuild that was in flight when the menu opened had
+            // its start dropped by the menu guard; start the normal way.
             maybeStartCarPlay()
+            return
+        }
+        if (activeAirPlaySession == null) {
+            restartCarPlay(
+                "CarPlay session was lost while settings were open; reconnecting",
+                retainHotspot = wirelessEnabled,
+            )
+            return
+        }
+        val size = activeDisplaySize
+        if (size != null && size != controllerDisplaySize) {
+            restartCarPlay("Display changed while settings were open", retainHotspot = wirelessEnabled)
         }
     }
 
@@ -4052,39 +4075,47 @@ class CarPlayHostActivity : ComponentActivity() {
         sink?.setSurface(SCREEN_TYPE_ALT, surface)
     }
 
+    /**
+     * Every touch in the window passes here before the view under it does, which is what a gesture
+     * that has to work on any screen needs: on the settings overlay [onHostTouch] never runs, because
+     * the menu covers the video view that owns it.
+     */
+    override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        if (
+            menuOpen &&
+            trackThreeFingerTap(event, releaseForwardedContacts = false) { dismissSettingsMenu() }
+        ) {
+            return true
+        }
+        return super.dispatchTouchEvent(event)
+    }
+
+    /** Leaves the settings overlay the way the back control does, from the three-finger gesture. */
+    private fun dismissSettingsMenu() {
+        if (!menuOpen) return
+        if (safeAreaEditorActive) {
+            closeSafeAreaEditor()
+        } else {
+            cancelSettingsEdits()
+        }
+    }
+
     private fun onHostTouch(view: View, event: MotionEvent): Boolean {
         if (menuOpen) return true
 
-        when (event.actionMasked) {
-            MotionEvent.ACTION_DOWN -> {
-                gestureTapSwallowed = false
-                gestureTapCandidate = false
-                edgeSettingsGestureCaptured = moreGesturesToSettings &&
-                    event.x in 0f..(view.width / 8f) &&
-                    event.y in 0f..(view.height / 4f)
-                edgeSettingsGestureEligible = edgeSettingsGestureCaptured
-            }
-            MotionEvent.ACTION_POINTER_DOWN -> {
-                if (event.pointerCount == THREE_FINGER_TAP_COUNT && !gestureTapSwallowed) {
-                    edgeSettingsGestureCaptured = false
-                    edgeSettingsGestureEligible = false
-                    gestureTapSwallowed = true
-                    gestureTapCandidate = true
-                    gestureTapStartX = pointerCentroid(event, horizontal = true)
-                    gestureTapStartY = pointerCentroid(event, horizontal = false)
-                    gestureTapDownTime = event.downTime
-                    // The first finger was forwarded like any other touch before the third one
-                    // arrived; taking the contacts back keeps the phone from also seeing a tap
-                    // under it.
-                    controller?.sendTouch(emptyList())
-                    appendLog(
-                        "Three-finger tap ${gestureTapsSeen + 1}/$THREE_FINGER_TAPS_TO_SETTINGS " +
-                            "tracking",
-                    )
-                    return true
-                }
-                if (gestureTapSwallowed) gestureTapCandidate = false
-            }
+        if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+            edgeSettingsGestureCaptured = moreGesturesToSettings &&
+                event.x in 0f..(view.width / 8f) &&
+                event.y in 0f..(view.height / 4f)
+            edgeSettingsGestureEligible = edgeSettingsGestureCaptured
+        }
+
+        // Two three-finger taps in a row open settings from the picture; the same gesture on the
+        // settings overlay leaves it again (handled in dispatchTouchEvent).
+        if (trackThreeFingerTap(event, releaseForwardedContacts = true) { openSettingsMenu() }) {
+            edgeSettingsGestureCaptured = false
+            edgeSettingsGestureEligible = false
+            return true
         }
 
         if (edgeSettingsGestureCaptured) {
@@ -4111,41 +4142,6 @@ class CarPlayHostActivity : ComponentActivity() {
             return true
         }
 
-        if (gestureTapSwallowed) {
-            // Two three-finger taps in a row open settings. A tap is judged when the first of the
-            // three fingers leaves, which is also the moment the contact stops being three-fingered.
-            when (event.actionMasked) {
-                MotionEvent.ACTION_MOVE -> {
-                    if (event.pointerCount != THREE_FINGER_TAP_COUNT ||
-                        Math.abs(
-                            pointerCentroid(event, horizontal = true) - gestureTapStartX,
-                        ) > dp(THREE_FINGER_TAP_SLOP_DP) ||
-                        Math.abs(
-                            pointerCentroid(event, horizontal = false) - gestureTapStartY,
-                        ) > dp(THREE_FINGER_TAP_SLOP_DP)
-                    ) {
-                        // Fingers that travel are a drag, not a tap.
-                        gestureTapCandidate = false
-                    }
-                }
-                MotionEvent.ACTION_POINTER_UP -> {
-                    if (event.pointerCount == THREE_FINGER_TAP_COUNT) {
-                        judgeThreeFingerTap(event.eventTime)
-                    }
-                }
-                MotionEvent.ACTION_UP -> {
-                    judgeThreeFingerTap(event.eventTime)
-                    gestureTapSwallowed = false
-                    gestureTapCandidate = false
-                }
-                MotionEvent.ACTION_CANCEL -> {
-                    gestureTapSwallowed = false
-                    gestureTapCandidate = false
-                }
-            }
-            return true
-        }
-
         val contacts = CarPlayTouchMapper.contacts(event, view.width, view.height)
         val queued = controller?.sendTouch(contacts) ?: false
         if (queued) {
@@ -4167,12 +4163,84 @@ class CarPlayHostActivity : ComponentActivity() {
     }
 
     /**
-     * Counts one three-finger tap and opens settings on the last of the pair.
+     * Tracks the three-finger double tap for whichever surface is receiving touches.
+     *
+     * Returns true while the contact belongs to the gesture, and the caller must then swallow it -
+     * the first finger has already reached whatever is under it. [onDoubleTap] runs once, after the
+     * second tap's fingers leave the screen. [releaseForwardedContacts] takes that first finger back
+     * from the phone, which only the CarPlay surface needs because only there has it been sent.
+     */
+    private fun trackThreeFingerTap(
+        event: MotionEvent,
+        releaseForwardedContacts: Boolean,
+        onDoubleTap: () -> Unit,
+    ): Boolean {
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                gestureTapSwallowed = false
+                gestureTapCandidate = false
+            }
+            MotionEvent.ACTION_POINTER_DOWN -> {
+                if (event.pointerCount == THREE_FINGER_TAP_COUNT && !gestureTapSwallowed) {
+                    gestureTapSwallowed = true
+                    gestureTapCandidate = true
+                    gestureTapStartX = pointerCentroid(event, horizontal = true)
+                    gestureTapStartY = pointerCentroid(event, horizontal = false)
+                    gestureTapDownTime = event.downTime
+                    if (releaseForwardedContacts) controller?.sendTouch(emptyList())
+                    appendLog(
+                        "Three-finger tap ${gestureTapsSeen + 1}/$THREE_FINGER_TAPS_TO_SETTINGS " +
+                            "tracking",
+                    )
+                    return true
+                }
+                if (gestureTapSwallowed) gestureTapCandidate = false
+            }
+        }
+
+        if (!gestureTapSwallowed) return false
+
+        // A tap is judged when the first of the three fingers leaves, which is also the moment the
+        // contact stops being three-fingered.
+        when (event.actionMasked) {
+            MotionEvent.ACTION_MOVE -> {
+                if (event.pointerCount != THREE_FINGER_TAP_COUNT ||
+                    Math.abs(
+                        pointerCentroid(event, horizontal = true) - gestureTapStartX,
+                    ) > dp(THREE_FINGER_TAP_SLOP_DP) ||
+                    Math.abs(
+                        pointerCentroid(event, horizontal = false) - gestureTapStartY,
+                    ) > dp(THREE_FINGER_TAP_SLOP_DP)
+                ) {
+                    // Fingers that travel are a drag, not a tap.
+                    gestureTapCandidate = false
+                }
+            }
+            MotionEvent.ACTION_POINTER_UP -> {
+                if (event.pointerCount == THREE_FINGER_TAP_COUNT) {
+                    judgeThreeFingerTap(event.eventTime, onDoubleTap)
+                }
+            }
+            MotionEvent.ACTION_UP -> {
+                judgeThreeFingerTap(event.eventTime, onDoubleTap)
+                gestureTapSwallowed = false
+                gestureTapCandidate = false
+            }
+            MotionEvent.ACTION_CANCEL -> {
+                gestureTapSwallowed = false
+                gestureTapCandidate = false
+            }
+        }
+        return true
+    }
+
+    /**
+     * Counts one three-finger tap and reports the double tap on the last of the pair.
      *
      * A tap has to be short and still; the fingers of the second tap may land anywhere, only the
      * gap between the two taps is limited, because three fingers cannot be placed as fast as one.
      */
-    private fun judgeThreeFingerTap(upTime: Long) {
+    private fun judgeThreeFingerTap(upTime: Long, onDoubleTap: () -> Unit) {
         if (!gestureTapCandidate) return
         gestureTapCandidate = false
         if (upTime - gestureTapDownTime > THREE_FINGER_TAP_MAX_MILLIS) return
@@ -4185,8 +4253,8 @@ class CarPlayHostActivity : ComponentActivity() {
         if (gestureTapsSeen >= THREE_FINGER_TAPS_TO_SETTINGS) {
             gestureTapsSeen = 0
             gestureTapLastUpTime = 0L
-            appendLog("Three-finger double tap; opening settings")
-            openSettingsMenu()
+            appendLog("Three-finger double tap")
+            onDoubleTap()
         } else {
             appendLog("Three-finger tap $gestureTapsSeen/$THREE_FINGER_TAPS_TO_SETTINGS")
         }
