@@ -367,10 +367,13 @@ class CarPlayHostActivity : ComponentActivity() {
     private var reconnectScheduled = false
     private var sessionLog: SessionLogFile? = null
     private var sessionLogDestination = ""
-    private var gestureSequenceActive = false
-    private var gestureTracking = false
-    private var gestureStartX = 0f
-    private var gestureStartY = 0f
+    private var gestureTapSwallowed = false
+    private var gestureTapCandidate = false
+    private var gestureTapStartX = 0f
+    private var gestureTapStartY = 0f
+    private var gestureTapDownTime = 0L
+    private var gestureTapsSeen = 0
+    private var gestureTapLastUpTime = 0L
     private var edgeSettingsGestureCaptured = false
     private var edgeSettingsGestureEligible = false
     private val shuttingDown = AtomicBoolean(false)
@@ -4047,25 +4050,33 @@ class CarPlayHostActivity : ComponentActivity() {
 
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
-                gestureSequenceActive = false
-                gestureTracking = false
+                gestureTapSwallowed = false
+                gestureTapCandidate = false
                 edgeSettingsGestureCaptured = moreGesturesToSettings &&
                     event.x in 0f..(view.width / 8f) &&
                     event.y in 0f..(view.height / 4f)
                 edgeSettingsGestureEligible = edgeSettingsGestureCaptured
             }
             MotionEvent.ACTION_POINTER_DOWN -> {
-                if (event.pointerCount == FOUR_FINGER_COUNT && !gestureSequenceActive) {
+                if (event.pointerCount == THREE_FINGER_TAP_COUNT && !gestureTapSwallowed) {
                     edgeSettingsGestureCaptured = false
                     edgeSettingsGestureEligible = false
-                    gestureSequenceActive = true
-                    gestureTracking = true
-                    gestureStartX = pointerCentroid(event, horizontal = true)
-                    gestureStartY = pointerCentroid(event, horizontal = false)
+                    gestureTapSwallowed = true
+                    gestureTapCandidate = true
+                    gestureTapStartX = pointerCentroid(event, horizontal = true)
+                    gestureTapStartY = pointerCentroid(event, horizontal = false)
+                    gestureTapDownTime = event.downTime
+                    // The first finger was forwarded like any other touch before the third one
+                    // arrived; taking the contacts back keeps the phone from also seeing a tap
+                    // under it.
                     controller?.sendTouch(emptyList())
-                    appendLog("Four-finger swipe tracking started")
+                    appendLog(
+                        "Three-finger tap ${gestureTapsSeen + 1}/$THREE_FINGER_TAPS_TO_SETTINGS " +
+                            "tracking",
+                    )
                     return true
                 }
+                if (gestureTapSwallowed) gestureTapCandidate = false
             }
         }
 
@@ -4093,29 +4104,36 @@ class CarPlayHostActivity : ComponentActivity() {
             return true
         }
 
-        if (gestureSequenceActive) {
-            if (!gestureTracking || event.pointerCount != FOUR_FINGER_COUNT) {
-                if (event.actionMasked == MotionEvent.ACTION_UP ||
-                    event.actionMasked == MotionEvent.ACTION_CANCEL
-                ) {
-                    gestureSequenceActive = false
-                    gestureTracking = false
-                } else if (event.actionMasked == MotionEvent.ACTION_POINTER_UP) {
-                    gestureTracking = false
+        if (gestureTapSwallowed) {
+            // Two three-finger taps in a row open settings. A tap is judged when the first of the
+            // three fingers leaves, which is also the moment the contact stops being three-fingered.
+            when (event.actionMasked) {
+                MotionEvent.ACTION_MOVE -> {
+                    if (event.pointerCount != THREE_FINGER_TAP_COUNT ||
+                        Math.abs(
+                            pointerCentroid(event, horizontal = true) - gestureTapStartX,
+                        ) > dp(THREE_FINGER_TAP_SLOP_DP) ||
+                        Math.abs(
+                            pointerCentroid(event, horizontal = false) - gestureTapStartY,
+                        ) > dp(THREE_FINGER_TAP_SLOP_DP)
+                    ) {
+                        // Fingers that travel are a drag, not a tap.
+                        gestureTapCandidate = false
+                    }
                 }
-                return true
-            }
-            if (event.actionMasked == MotionEvent.ACTION_MOVE) {
-                val deltaX = Math.abs(pointerCentroid(event, horizontal = true) - gestureStartX)
-                val deltaY = pointerCentroid(event, horizontal = false) - gestureStartY
-                if (
-                    deltaY >= dp(FOUR_FINGER_SWIPE_DISTANCE_DP) &&
-                    deltaY >= deltaX * FOUR_FINGER_SWIPE_DIRECTION_RATIO
-                ) {
-                    gestureSequenceActive = false
-                    gestureTracking = false
-                    openSettingsMenu()
-                    return true
+                MotionEvent.ACTION_POINTER_UP -> {
+                    if (event.pointerCount == THREE_FINGER_TAP_COUNT) {
+                        judgeThreeFingerTap(event.eventTime)
+                    }
+                }
+                MotionEvent.ACTION_UP -> {
+                    judgeThreeFingerTap(event.eventTime)
+                    gestureTapSwallowed = false
+                    gestureTapCandidate = false
+                }
+                MotionEvent.ACTION_CANCEL -> {
+                    gestureTapSwallowed = false
+                    gestureTapCandidate = false
                 }
             }
             return true
@@ -4139,6 +4157,32 @@ class CarPlayHostActivity : ComponentActivity() {
             )
         }
         return true
+    }
+
+    /**
+     * Counts one three-finger tap and opens settings on the last of the pair.
+     *
+     * A tap has to be short and still; the fingers of the second tap may land anywhere, only the
+     * gap between the two taps is limited, because three fingers cannot be placed as fast as one.
+     */
+    private fun judgeThreeFingerTap(upTime: Long) {
+        if (!gestureTapCandidate) return
+        gestureTapCandidate = false
+        if (upTime - gestureTapDownTime > THREE_FINGER_TAP_MAX_MILLIS) return
+        gestureTapsSeen = if (upTime - gestureTapLastUpTime <= THREE_FINGER_DOUBLE_TAP_WINDOW_MILLIS) {
+            gestureTapsSeen + 1
+        } else {
+            1
+        }
+        gestureTapLastUpTime = upTime
+        if (gestureTapsSeen >= THREE_FINGER_TAPS_TO_SETTINGS) {
+            gestureTapsSeen = 0
+            gestureTapLastUpTime = 0L
+            appendLog("Three-finger double tap; opening settings")
+            openSettingsMenu()
+        } else {
+            appendLog("Three-finger tap $gestureTapsSeen/$THREE_FINGER_TAPS_TO_SETTINGS")
+        }
     }
 
     private fun pointerCentroid(event: MotionEvent, horizontal: Boolean): Float {
@@ -4515,9 +4559,13 @@ class CarPlayHostActivity : ComponentActivity() {
         const val AUDIO_CAPTURE_MARKER = "audio-capture.enabled"
         const val AUDIO_CAPTURE_DIRECTORY = "audio-captures"
         const val PROTOCOL_TRACE_PREFIX = "TRACE "
-        const val FOUR_FINGER_COUNT = 4
-        const val FOUR_FINGER_SWIPE_DISTANCE_DP = 72
-        const val FOUR_FINGER_SWIPE_DIRECTION_RATIO = 1.15f
+        const val THREE_FINGER_TAP_COUNT = 3
+        const val THREE_FINGER_TAPS_TO_SETTINGS = 2
+        const val THREE_FINGER_TAP_SLOP_DP = 20
+        const val THREE_FINGER_TAP_MAX_MILLIS = 350L
+
+        /** Gap allowed between the two taps; three fingers cannot be placed as fast as one. */
+        const val THREE_FINGER_DOUBLE_TAP_WINDOW_MILLIS = 700L
         const val IDLE_PANEL_SIDE_BY_SIDE_PX = 1400
         const val PANEL_EDGE_FRACTION = 0.042f
         const val IDLE_TITLE_HEIGHT_FRACTION = 0.08f
