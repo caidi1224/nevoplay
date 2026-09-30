@@ -542,5 +542,6 @@ fun View.applyHostScale(textScale: Float, spaceScale: Float) {
     }
 }
 
-private const val MIN_TOUCH_WIDTH_DP = 24
+/** A control may shrink with the panel, but not below what a finger can hit. */
+private const val MIN_TOUCH_WIDTH_DP = 44
 private const val MIN_TOUCH_HEIGHT_DP = 44

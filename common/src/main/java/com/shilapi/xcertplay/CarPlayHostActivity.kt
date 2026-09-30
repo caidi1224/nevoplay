@@ -1136,6 +1136,8 @@ class CarPlayHostActivity : ComponentActivity() {
             addView(
                 HostUi.chip(this@CarPlayHostActivity, "❯").apply {
                     contentDescription = "Back to the host screen without saving"
+                    // The padding shrinks with the panel; the tap target may not.
+                    minWidth = HostUi.dp(this@CarPlayHostActivity, 56)
                     setOnClickListener { cancelSettingsEdits() }
                 },
                 LinearLayout.LayoutParams(
