@@ -31,6 +31,7 @@ import android.view.Surface
 import android.view.TextureView
 import android.view.View
 import android.view.ViewGroup
+import android.view.WindowInsetsController
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.ImageView
@@ -871,15 +872,34 @@ class CarPlayHostActivity : ComponentActivity() {
     /**
      * Bars and window background only - no hide or show request, so this can run on a theme change
      * without joining the fight over who owns the bars.
+     *
+     * The icon tint goes out twice on API 30+: once through the platform's own
+     * [WindowInsetsController] and once through androidx's compatibility wrapper. That is not
+     * belt-and-braces for its own sake - on this vehicle the wrapper is the half that does not
+     * arrive. `WindowInsetsControllerCompat(window, view)` builds androidx's Impl30 from the Window,
+     * and with a Window in hand `setAppearanceLight*` writes the deprecated
+     * `View.setSystemUiVisibility` flag instead of calling `setSystemBarsAppearance`; the head unit
+     * honours the window's status bar colour (which is why the bars follow the palette at all) but
+     * not that legacy flag, so a light theme kept white icons on an off-white bar.
      */
     @Suppress("DEPRECATION")
     private fun applySystemBarPalette() {
         window.statusBarColor = MENU_BACKGROUND
         window.navigationBarColor = MENU_BACKGROUND
         window.decorView.setBackgroundColor(MENU_BACKGROUND)
+        // Dark palette means dark bars, so the icons have to be light - and the other way round.
+        val darkBars = darkMode
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val lightIcons = WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or
+                WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
+            window.insetsController?.setSystemBarsAppearance(
+                if (darkBars) 0 else lightIcons,
+                lightIcons,
+            )
+        }
         val controller = WindowInsetsControllerCompat(window, window.decorView)
-        controller.isAppearanceLightStatusBars = !darkMode
-        controller.isAppearanceLightNavigationBars = !darkMode
+        controller.isAppearanceLightStatusBars = !darkBars
+        controller.isAppearanceLightNavigationBars = !darkBars
     }
 
     /**
