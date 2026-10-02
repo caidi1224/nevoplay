@@ -1485,8 +1485,15 @@ class CarPlayController(
             val carkit = try {
                 carKitClient.open(pairRecord, config.label)
             } catch (error: Throwable) {
-                if (!isInvalidPairRecord(error)) throw error
-                debugLog("saved Lockdown pair record rejected; pairing again")
+                // Only a rejected *saved* record is worth clearing and re-pairing: a fresh record
+                // Lockdown refuses would otherwise be thrown away and paired again in a loop, and a
+                // failure that is not about the record at all has to stay visible.
+                val rejection = rejectedPairRecordError(error)
+                if (savedPairRecord == null || rejection == null) throw error
+                debugLog(
+                    "saved Lockdown pair record rejected by Lockdown error=$rejection; " +
+                        "clearing it and pairing again",
+                )
                 clearPairRecord()
                 pairRecord = pairNewRecord(pairingClient)
                 carKitClient.open(pairRecord, config.label)
@@ -1558,13 +1565,20 @@ class CarPlayController(
             isCancelled = { closed },
         ).pairRecord.also(savePairRecord)
 
-    private fun isInvalidPairRecord(error: Throwable): Boolean {
+    /**
+     * Names the Lockdown rejection that means "this record is no longer accepted", or null when the
+     * failure is something else. `InvalidHostID` counts: iOS answers that when it no longer knows
+     * the host identity in the record, and pairing again is exactly the fix.
+     */
+    private fun rejectedPairRecordError(error: Throwable): String? {
         var cause: Throwable? = error
         while (cause != null) {
-            if (cause.message?.contains("InvalidPairRecord", ignoreCase = true) == true) return true
+            val message = cause.message.orEmpty()
+            if (message.contains("InvalidPairRecord", ignoreCase = true)) return "InvalidPairRecord"
+            if (message.contains("InvalidHostID", ignoreCase = true)) return "InvalidHostID"
             cause = cause.cause
         }
-        return false
+        return null
     }
 
     private fun isBluetoothHandoffCommand(type: String): Boolean =
