@@ -74,7 +74,16 @@ back on its own.**
    `mobile/debug/`, `mobile/release/`, `tools/`, `agent_docs/`, `research/`,
    and log files. Check `git status` before staging: no build output, no APKs,
    no keystores, no passwords or tokens.
-6. **Never rewrite published history.** No `git push --force`, no `amend` or
+6. **Certificate and signing material never enters the history.** The MFi
+   documents (`cert/`), any `.p7b` / `.pk8` / `.jks` / `.keystore` / `.p12`,
+   `*.signing.env`, and the build artifacts that embed them (`apk/`, `*.apk`,
+   `*.aab` - a debug APK carries `assets/mfi/mfi.p7b` and `mfi.pk8`) are excluded
+   by `.gitignore`, refused by the versioned `.githooks/pre-commit` (it reads the
+   index, so `git add -f` does not get around it), and checked again in CI. `cert/` lives only in this working copy;
+   the build reads it from there (see "Verify locally"). If a secret does reach a
+   commit, treat the material as compromised and rotate it - deleting the file in
+   a later commit does not remove it from history.
+7. **Never rewrite published history.** No `git push --force`, no `amend` or
    `rebase` on commits that are already on `origin` (especially `master`, which
    is a release branch that CI builds on every push). To undo something that
    has been pushed, revert it forward:
@@ -84,7 +93,7 @@ back on its own.**
    git log --oneline -5      # confirm
    ```
 
-7. Local, unpushed commits are the cheap rollback path while working:
+8. Local, unpushed commits are the cheap rollback path while working:
 
    ```bash
    git reset --hard HEAD~1   # undo the last local commit (unpushed only)
@@ -321,3 +330,4 @@ and the bar-state logging in this fork came to exist.
 - **CI 工作流**：`.github/workflows/fork-debug-apks.yml`（产物 `fork-debug-apks`），`workflow_dispatch` 已存在，**不要再加一次** —— 重复键会让 GitHub 直接拒绝整个工作流，且那次运行没有日志可看。
 - **车机上没有 adb，也不要让人去连**：任何诊断都不能依赖它——不用 `dumpsys`，不用主机侧 `logcat`，不读 app 够不到的 `/vendor/etc`。设备侧的问题只能靠上面那份日志、靠 app 能观察到的自身状态、或靠驾驶员能看到/听到的东西来回答。缺观测项就往 app 里加一行，而不是去找主机工具。
 - 提交前先看 `git status`：不要提交 `build/`、APK、keystore、`local.properties`、日志等生成物或本地状态。
+- **证书与签名材料永远不进历史**：MFi 材料（`cert/`）、任何 `.p7b`/`.pk8`/`.jks`/`.keystore`/`.p12`、`*.signing.env`，以及内嵌这些材料的产物（`apk/`、`*.apk`、`*.aab`——debug 包里有 `assets/mfi/mfi.p7b` 和 `mfi.pk8`，所以成品包同样算秘密材料）由三层挡住——`.gitignore` 规则、版本化的 `.githooks/pre-commit`（它检查暂存区，所以 `git add -f` 也绕不过）、以及 CI 里的复查。`cert/` 只存在于本机工作副本，构建从那里读取（见上文验证命令）。万一有秘密进了提交，按已泄露处理并轮换：事后再删文件并不会把它从历史里移除。

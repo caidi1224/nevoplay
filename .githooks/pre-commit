@@ -1,0 +1,24 @@
+#!/bin/sh
+# Personal-fork guard: certificate and signing material must never enter the history.
+# A built APK counts: it carries assets/mfi/mfi.p7b and mfi.pk8.
+# See AGENTS.md -> commit policy. Restore with: git config core.hooksPath .githooks
+#
+# This checks the *index*, so `git add -f` on an ignored path does not get around it, and
+# neither does a rule that someone later removes from .gitignore.
+
+pattern='(^|/)cert/|(^|/)apk/|\.(p7b|pk8|jks|keystore|p12|apk|aab|apks)$|(^|/)signing\.env$'
+
+staged=$(git diff --cached --name-only --diff-filter=ACM)
+if [ -z "$staged" ]; then
+  exit 0
+fi
+
+if printf '%s\n' "$staged" | grep -qE "$pattern"; then
+  echo "pre-commit: BLOCKED - certificate or signing material is staged:" >&2
+  printf '%s\n' "$staged" | grep -E "$pattern" | sed 's/^/  /' >&2
+  echo "pre-commit: the material stays local. Take it out of the index and keep the file:" >&2
+  echo "pre-commit:   git rm --cached <path>" >&2
+  exit 1
+fi
+
+exit 0

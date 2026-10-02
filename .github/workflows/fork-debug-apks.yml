@@ -29,6 +29,19 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
+      - name: Refuse tracked certificate material
+        # The versioned pre-commit hook only exists where `core.hooksPath .githooks` is configured, so
+        # this runs no matter who committed. A debug APK counts as material: it carries
+        # assets/mfi/mfi.p7b and mfi.pk8. See AGENTS.md -> commit policy.
+        run: |
+          offenders=$(git ls-files | grep -E '(^|/)cert/|(^|/)apk/|\.(p7b|pk8|jks|keystore|p12|apk|aab|apks)$|(^|/)signing\.env$' || true)
+          if [ -n "$offenders" ]; then
+            echo "::error::Certificate or signing material is tracked in this repository"
+            printf '%s\n' "$offenders"
+            exit 1
+          fi
+          echo "No certificate material or APK is tracked."
+
       - name: Set up JDK 25
         uses: actions/setup-java@v4
         with:

@@ -23,6 +23,25 @@ mobile/release/
 mobile/debug/
 
 
+# Deployment secrets - the MFi certificate and its private key, this fork's signing
+# keystore, and local environment files. The repository never carries them; three
+# guards keep it that way: these rules, .githooks/pre-commit, and a CI check.
+cert/
+*.p7b
+*.pk8
+*.jks
+*.keystore
+*.p12
+*.signing.env
+
+# Build artifacts that embed the documents above: a debug APK carries
+# assets/mfi/mfi.p7b and mfi.pk8, so it is secret material too - do not commit one,
+# keep them in this local apk/ directory instead.
+apk/
+*.apk
+*.aab
+*.apks
+
 # OS files
 .DS_Store
 Thumbs.db
