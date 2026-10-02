@@ -2217,6 +2217,7 @@ class CarPlayHostActivity : ComponentActivity() {
             ).apply { topMargin = dp(6) },
         )
         mfiErrorView = error
+        updateLocalMfiStatus()
         updateMfiTargetFields()
         return section
     }
@@ -4295,6 +4296,9 @@ class CarPlayHostActivity : ComponentActivity() {
         gestureOverlay?.visibility = View.GONE
         settingsMenu?.visibility = View.VISIBLE
         syncMicrophoneGainControls()
+        // Re-probe the local MFi directories on every open: the files are pushed over adb while the
+        // app is running, and the section is built once.
+        refreshLocalMfiSources()
         updateDebugOverlays()
         clearScreenLogs()
         appendLog("Settings opened over the running session")
