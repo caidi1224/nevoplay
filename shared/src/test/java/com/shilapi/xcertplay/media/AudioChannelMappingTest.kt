@@ -40,11 +40,29 @@ class AudioChannelMappingTest {
 
     @Test
     fun automotiveMappingUsesTheBusSpecificCarPlayTypes() {
-        listOf("media", "default", "compatibility").forEach { audioType ->
+        assertMapped(
+            mode = AudioChannelMappingMode.AUTOMOTIVE_BUS,
+            audioType = "media",
+            payloadType = 102,
+            channel = AudioChannel.MEDIA,
+            contentType = AudioContentType.MUSIC,
+        )
+        // The guidance stream is the one that opens beside the main audio, and it arrives labelled
+        // `default` on a payload type that is not the main audio. Sending it to the media bus put
+        // the navigation prompts on the music channel on the head unit this fork targets, which is
+        // why these two are decided by the payload type rather than by the label alone.
+        listOf("default", "compatibility").forEach { audioType ->
             assertMapped(
                 mode = AudioChannelMappingMode.AUTOMOTIVE_BUS,
                 audioType = audioType,
-                payloadType = 100,
+                payloadType = 101,
+                channel = AudioChannel.NAVIGATION,
+                contentType = AudioContentType.SPEECH,
+            )
+            assertMapped(
+                mode = AudioChannelMappingMode.AUTOMOTIVE_BUS,
+                audioType = audioType,
+                payloadType = 102,
                 channel = AudioChannel.MEDIA,
                 contentType = AudioContentType.MUSIC,
             )

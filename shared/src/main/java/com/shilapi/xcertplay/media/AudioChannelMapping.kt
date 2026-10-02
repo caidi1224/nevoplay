@@ -25,8 +25,11 @@ internal data class AudioChannelSelection(
 /**
  * Maps CarPlay stream metadata to Android AudioAttributes values.
  *
- * AAOS routes AudioTrack instances by usage, so the automotive mode keeps generic media streams
- * on the media bus instead of reusing mobile's navigation fallback for default/compatibility.
+ * AAOS routes AudioTrack instances by usage, so the two modes differ in what they do with the
+ * audio types the phone does not label as music, speech or a call. Mobile sends all of them to the
+ * navigation fallback; the automotive mode keeps one on the media bus only when its payload type
+ * says it is the main audio. That distinction is what the automotive mode is for, and it is the
+ * only thing that tells a music stream from the guidance stream arriving beside it.
  */
 internal object AudioChannelMapper {
     const val STREAM_TYPE_MAIN_HIGH_AUDIO = 102
@@ -63,8 +66,12 @@ internal object AudioChannelMapper {
         "telephony" -> AudioChannelSelection(AudioChannel.PHONE, AudioContentType.SPEECH)
         "speechrecognition" ->
             AudioChannelSelection(AudioChannel.ASSISTANT, AudioContentType.SPEECH)
-        "media", "default", "compatibility" ->
-            AudioChannelSelection(AudioChannel.MEDIA, AudioContentType.MUSIC)
+        // Only a stream the phone labels as media is generic media. `default` and `compatibility`
+        // used to land here too, which put the navigation prompts on the music bus: the guidance
+        // stream arrives as (type 101, audioType default), and a device log shows it open beside
+        // type 102 rather than replacing it. They now fall through to the payload type, which keeps
+        // a genuine main-audio stream on the media bus and the guidance stream on navigation.
+        "media" -> AudioChannelSelection(AudioChannel.MEDIA, AudioContentType.MUSIC)
         "alert" -> AudioChannelSelection(AudioChannel.NAVIGATION, AudioContentType.SPEECH)
         else -> mainHighAudioOrNavigation(payloadType)
     }
