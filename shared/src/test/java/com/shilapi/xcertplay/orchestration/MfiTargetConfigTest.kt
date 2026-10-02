@@ -51,18 +51,74 @@ class MfiTargetConfigTest {
         }
     }
 
+    @Test
+    fun localFilesTargetAcceptsBothChosenDocuments() {
+        val config = config(
+            mfiTarget = MfiTarget.LOCAL_FILES,
+            localMfiCertificateUri = "content://com.example.documents/document/certificate",
+            localMfiPrivateKeyUri = "content://com.example.documents/document/key",
+        )
+
+        assertEquals(MfiTarget.LOCAL_FILES, config.mfiTarget)
+    }
+
+    @Test
+    fun localFilesTargetAcceptsNoDocumentsAtAll() {
+        // The fixed directories (see LocalMfiDocuments) are the whole point of this target on a head
+        // unit whose picker cannot hand out a certificate, so neither URI may be mandatory.
+        val config = config(mfiTarget = MfiTarget.LOCAL_FILES)
+
+        assertEquals(MfiTarget.LOCAL_FILES, config.mfiTarget)
+        assertEquals(null, config.localMfiCertificateUri)
+    }
+
+    @Test
+    fun localFilesTargetRejectsACertificateWithoutItsKey() {
+        assertThrows(IllegalArgumentException::class.java) {
+            config(
+                mfiTarget = MfiTarget.LOCAL_FILES,
+                localMfiCertificateUri = "content://com.example.documents/document/certificate",
+            )
+        }
+    }
+
+    @Test
+    fun localFilesTargetRejectsAKeyWithoutItsCertificate() {
+        assertThrows(IllegalArgumentException::class.java) {
+            config(
+                mfiTarget = MfiTarget.LOCAL_FILES,
+                localMfiPrivateKeyUri = "content://com.example.documents/document/key",
+            )
+        }
+    }
+
+    @Test
+    fun localFilesTargetRejectsAPlainFileUri() {
+        assertThrows(IllegalArgumentException::class.java) {
+            config(
+                mfiTarget = MfiTarget.LOCAL_FILES,
+                localMfiCertificateUri = "file:///sdcard/Download/xcertplay/mfi.p7b",
+                localMfiPrivateKeyUri = "file:///sdcard/Download/xcertplay/mfi.pk8",
+            )
+        }
+    }
+
     private fun config(
         mfiTarget: MfiTarget,
         ch341Devices: List<UsbDeviceId> = emptyList(),
         linuxI2cPath: String? = null,
         remoteMfiServer: String? = null,
         remoteMfiToken: String? = null,
+        localMfiCertificateUri: String? = null,
+        localMfiPrivateKeyUri: String? = null,
     ): CarPlayRuntimeConfig = CarPlayRuntimeConfig(
         mfiTarget = mfiTarget,
         ch341Devices = ch341Devices,
         linuxI2cPath = linuxI2cPath,
         remoteMfiServer = remoteMfiServer,
         remoteMfiToken = remoteMfiToken,
+        localMfiCertificateUri = localMfiCertificateUri,
+        localMfiPrivateKeyUri = localMfiPrivateKeyUri,
         identification = Iap2IdentificationConfig(
             name = "test",
             modelIdentifier = "test",

@@ -57,6 +57,25 @@
 建议把私钥放在受保护的位置。应用不会把证书或私钥复制到偏好设置，只会保存 Android
 授予的持久读取权限和文档 URI。
 
+### 没有文件选择器的车机
+
+不少车机根本没有文档选择器，`Choose` 无从发起。此时应用会从固定目录读取这一对文件，
+文件名必须正好是 `mfi.p7b` 和 `mfi.pk8`：
+
+| 目录 | 能否读取 |
+| --- | --- |
+| `/sdcard/Download/xcertplay/` | 与会话日志同目录，文件管理器可见。但 Android 只对持有存储权限的应用开放他人写入的文档，较新版本可能读不到。 |
+| `/sdcard/Android/data/com.shilapi.xcertplay/files/mfi/` | 应用专属目录：不需要任何权限，各版本 Android 都能读；Android 11+ 对文件管理器隐藏。 |
+
+通过选择器选中的两个文档优先于固定目录；固定目录内部，`Download/xcertplay` 先于应用
+专属目录。`Local files` 设置项会显示实际将读取的文件，推完文件可点 `Refresh files`
+重新检查。
+
+```bash
+adb push mfi.p7b /sdcard/Download/xcertplay/
+adb push mfi.pk8 /sdcard/Download/xcertplay/
+```
+
 ## 工程结构
 
 | 路径 | 用途 |

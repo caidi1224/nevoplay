@@ -72,6 +72,27 @@ Store the private key in a protected location. Neither file is copied into app
 preferences; only Android's persistent read permission and document URI are
 saved.
 
+### Head units without a file picker
+
+Many panels have no document provider at all, so the picker has nothing to
+launch. The app then reads the pair from a fixed directory, with the files named
+exactly `mfi.p7b` and `mfi.pk8`:
+
+| Directory | Readable |
+| --- | --- |
+| `/sdcard/Download/xcertplay/` | Next to the session log, visible to file managers. Android gives one app access to documents another writer contributed only with storage access, so this may be refused on newer versions. |
+| `/sdcard/Android/data/com.shilapi.xcertplay/files/mfi/` | The app's own directory: no permission involved, readable on every Android version, hidden from file managers on Android 11+. |
+
+Both documents chosen through the picker win over the fixed directories; inside
+the fixed directories `Download/xcertplay` is tried before the app's own one. The
+`Local files` settings section names the files that will actually be read, and
+`Refresh files` re-checks after a push.
+
+```bash
+adb push mfi.p7b /sdcard/Download/xcertplay/
+adb push mfi.pk8 /sdcard/Download/xcertplay/
+```
+
 ## Project structure
 
 | Path | Purpose |

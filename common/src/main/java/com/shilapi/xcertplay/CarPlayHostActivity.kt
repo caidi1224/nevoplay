@@ -46,6 +46,7 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
+import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
@@ -70,6 +71,7 @@ import com.shilapi.xcertplay.media.AndroidMediaSink
 import com.shilapi.xcertplay.media.CarPlayTouchMapper
 import com.shilapi.xcertplay.media.MicrophoneGain
 import com.shilapi.xcertplay.media.MicrophoneLevelMonitor
+import com.shilapi.xcertplay.mfi.LocalMfiDocuments
 import com.shilapi.xcertplay.network.CarPlayVpnService
 import com.shilapi.xcertplay.orchestration.CarPlayController
 import com.shilapi.xcertplay.orchestration.CarPlayRuntimeConfig
@@ -243,6 +245,7 @@ class CarPlayHostActivity : ComponentActivity() {
             if (uri != null && retainDocumentReadPermission(uri, "certificate")) {
                 localMfiCertificateUri = uri.toString()
                 updateLocalMfiDocumentViews()
+                updateLocalMfiStatus()
                 mfiErrorView?.visibility = View.GONE
             }
         }
@@ -252,6 +255,7 @@ class CarPlayHostActivity : ComponentActivity() {
             if (uri != null && retainDocumentReadPermission(uri, "private key")) {
                 localMfiPrivateKeyUri = uri.toString()
                 updateLocalMfiDocumentViews()
+                updateLocalMfiStatus()
                 mfiErrorView?.visibility = View.GONE
             }
         }
@@ -287,6 +291,7 @@ class CarPlayHostActivity : ComponentActivity() {
     private var remoteMfiTokenInput: EditText? = null
     private var localMfiCertificateDocumentView: TextView? = null
     private var localMfiPrivateKeyDocumentView: TextView? = null
+    private var localMfiStatusView: TextView? = null
     private var settingsBaseline: SettingsBaseline? = null
     private var locationReportingSwitch: HostToggle? = null
     private var microphoneGainSeekBar: HostSlider? = null
@@ -2127,6 +2132,10 @@ class CarPlayHostActivity : ComponentActivity() {
         )
         mfiRemoteFields = remoteFields
 
+        // Create the app-owned directory while the user is looking at the target, so an
+        // `adb push .../files/mfi/` has somewhere to land before the first connection.
+        LocalMfiDocuments.appSource(this)?.directory?.mkdirs()
+
         val localFields = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             addView(
@@ -2135,8 +2144,7 @@ class CarPlayHostActivity : ComponentActivity() {
                     localMfiCertificateUri,
                     onDocumentViewCreated = { localMfiCertificateDocumentView = it },
                 ) {
-                    externalActivityInProgress = true
-                    localMfiCertificatePicker.launch(arrayOf("*/*"))
+                    launchLocalMfiPicker(localMfiCertificatePicker, "certificate")
                 },
                 LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
@@ -2149,8 +2157,7 @@ class CarPlayHostActivity : ComponentActivity() {
                     localMfiPrivateKeyUri,
                     onDocumentViewCreated = { localMfiPrivateKeyDocumentView = it },
                 ) {
-                    externalActivityInProgress = true
-                    localMfiPrivateKeyPicker.launch(arrayOf("*/*"))
+                    launchLocalMfiPicker(localMfiPrivateKeyPicker, "private key")
                 },
                 LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
@@ -2168,6 +2175,27 @@ class CarPlayHostActivity : ComponentActivity() {
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.WRAP_CONTENT,
                 ).apply { topMargin = dp(4) },
+            )
+            // A head unit whose system picker cannot hand out a certificate uses one of the fixed
+            // directories instead, so the panel has to name the files it would actually read.
+            val status = menuText("", 14f, MENU_FAINT)
+            localMfiStatusView = status
+            addView(
+                status,
+                LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                ).apply { topMargin = dp(8) },
+            )
+            addView(
+                HostUi.chip(this@CarPlayHostActivity, "Refresh files").apply {
+                    contentDescription = "Look for the fixed MFi files again"
+                    setOnClickListener { refreshLocalMfiSources() }
+                },
+                LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                ).apply { topMargin = dp(8) },
             )
         }
         section.addView(
@@ -2248,6 +2276,90 @@ class CarPlayHostActivity : ComponentActivity() {
         localMfiPrivateKeyDocumentView?.text = localMfiDocumentLabel(localMfiPrivateKeyUri)
     }
 
+    /**
+     * Opens the system picker, or explains that this head unit does not have one.
+     *
+     * A panel without a document provider throws [ActivityNotFoundException] from the launch, which
+     * is precisely the case the fixed directories cover — so the failure is reported and the status
+     * line below the buttons then names the files that will be read instead.
+     */
+    private fun launchLocalMfiPicker(
+        picker: ActivityResultLauncher<Array<String>>,
+        label: String,
+    ) {
+        externalActivityInProgress = true
+        try {
+            picker.launch(arrayOf("*/*"))
+        } catch (error: ActivityNotFoundException) {
+            externalActivityInProgress = false
+            appendLog("The head unit has no file picker for the local MFi $label: ${error.message}")
+            Toast.makeText(
+                this,
+                "No file picker on this head unit — using the fixed MFi paths",
+                Toast.LENGTH_LONG,
+            ).show()
+            refreshLocalMfiSources()
+        }
+    }
+
+    private fun refreshLocalMfiSources() {
+        updateLocalMfiDocumentViews()
+        updateLocalMfiStatus()
+        mfiErrorView?.visibility = View.GONE
+    }
+
+    /**
+     * Names the material the next MFI connection will use: the chosen documents, or the first fixed
+     * directory that holds a readable pair. Saying which copy won matters here, because the fixed
+     * directories can exist and still be unreadable on newer Android versions.
+     */
+    private fun updateLocalMfiStatus() {
+        val view = localMfiStatusView ?: return
+        val documentsChosen =
+            localMfiCertificateUri.isNotBlank() && localMfiPrivateKeyUri.isNotBlank()
+        if (documentsChosen) {
+            view.text = "Source: the two chosen documents"
+            view.setTextColor(MENU_SECONDARY)
+            return
+        }
+        val partialDocuments =
+            localMfiCertificateUri.isNotBlank() || localMfiPrivateKeyUri.isNotBlank()
+        val candidates = LocalMfiDocuments.candidates(this)
+        val usable = candidates.firstOrNull {
+            LocalMfiDocuments.state(it) == LocalMfiDocuments.FixedState.USABLE
+        }
+        if (usable != null) {
+            view.text = "Source: ${usable.displayPath} " +
+                "(${LocalMfiDocuments.CERTIFICATE_FILE_NAME} + " +
+                "${LocalMfiDocuments.PRIVATE_KEY_FILE_NAME})"
+            view.setTextColor(MENU_SECONDARY)
+            return
+        }
+        val partial = candidates.firstOrNull {
+            LocalMfiDocuments.state(it) == LocalMfiDocuments.FixedState.PARTIAL
+        }
+        if (partial != null) {
+            val names = LocalMfiDocuments.unreadableFileNames(partial).joinToString(", ")
+            view.text = "Found ${partial.displayPath}, but $names cannot be read on this Android " +
+                "version. Push the pair to ${appFilesMfiPath()} instead."
+            view.setTextColor(MENU_DANGER)
+            return
+        }
+        view.text = if (partialDocuments) {
+            "Choose both documents, or place ${LocalMfiDocuments.CERTIFICATE_FILE_NAME} + " +
+                "${LocalMfiDocuments.PRIVATE_KEY_FILE_NAME} in one of the fixed directories"
+        } else {
+            "No certificate material yet. Choose both documents, or push " +
+                "${LocalMfiDocuments.CERTIFICATE_FILE_NAME} + " +
+                "${LocalMfiDocuments.PRIVATE_KEY_FILE_NAME} to " +
+                candidates.joinToString(" or ") { it.displayPath }
+        }
+        view.setTextColor(MENU_DANGER)
+    }
+
+    private fun appFilesMfiPath(): String =
+        LocalMfiDocuments.appSource(this)?.displayPath ?: "the app files directory"
+
     private fun localMfiDocumentLabel(value: String): String {
         if (value.isEmpty()) return "Not selected"
         val uri = try {
@@ -2303,6 +2415,7 @@ class CarPlayHostActivity : ComponentActivity() {
             remoteMfiTokenInput?.setText(remoteMfiToken)
         }
         updateLocalMfiDocumentViews()
+        updateLocalMfiStatus()
         updateMfiTargetFields()
     }
 
@@ -3331,10 +3444,17 @@ class CarPlayHostActivity : ComponentActivity() {
                 !remoteMfiServer.trim().startsWith("http://") &&
                 !remoteMfiServer.trim().startsWith("https://") ->
                 "Remote server address must start with http:// or https://"
-            mfiTarget == MfiTarget.LOCAL_FILES && localMfiCertificateUri.isBlank() ->
-                "Select a local certificate"
-            mfiTarget == MfiTarget.LOCAL_FILES && localMfiPrivateKeyUri.isBlank() ->
-                "Select a local private key"
+            mfiTarget == MfiTarget.LOCAL_FILES &&
+                localMfiCertificateUri.isBlank() != localMfiPrivateKeyUri.isBlank() ->
+                "Choose both local MFi documents, or neither"
+            mfiTarget == MfiTarget.LOCAL_FILES &&
+                localMfiCertificateUri.isBlank() &&
+                LocalMfiDocuments.resolve(this) == null ->
+                "No local MFi certificate: choose both documents, or push " +
+                    "${LocalMfiDocuments.CERTIFICATE_FILE_NAME} + " +
+                    "${LocalMfiDocuments.PRIVATE_KEY_FILE_NAME} to " +
+                    LocalMfiDocuments.candidates(this)
+                        .joinToString(" or ") { it.displayPath }
             '\u0000' in mfiI2cPath -> "I2C device path contains U+0000"
             '\u0000' in remoteMfiServer -> "Remote server address contains U+0000"
             '\u0000' in remoteMfiToken -> "Remote token contains U+0000"

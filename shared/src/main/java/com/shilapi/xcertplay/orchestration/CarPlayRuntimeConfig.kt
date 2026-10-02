@@ -48,6 +48,11 @@ class CarPlayRuntimeConfig(
     val linuxI2cPath: String? = null,
     val remoteMfiServer: String? = null,
     val remoteMfiToken: String? = null,
+    /**
+     * MFi material picked through the system picker. Both are null when the deployment provisions
+     * `LocalMfiDocuments`' fixed directories instead, which is the norm on a head unit whose system
+     * picker cannot hand out a certificate.
+     */
     val localMfiCertificateUri: String? = null,
     val localMfiPrivateKeyUri: String? = null,
     val hostMac: ByteArray = DEFAULT_HOST_MAC,
@@ -85,21 +90,22 @@ class CarPlayRuntimeConfig(
         require(mfiTarget != MfiTarget.REMOTE || !remoteMfiServer.isNullOrBlank()) {
             "A server address must be configured for the remote MFi target"
         }
-        require(mfiTarget != MfiTarget.LOCAL_FILES || !localMfiCertificateUri.isNullOrBlank()) {
-            "A certificate document must be selected for the local-files MFi target"
-        }
-        require(mfiTarget != MfiTarget.LOCAL_FILES || !localMfiPrivateKeyUri.isNullOrBlank()) {
-            "A private-key document must be selected for the local-files MFi target"
+        // The two documents are optional as a pair: a head unit with no system picker provisions
+        // them in one of the fixed directories instead (see LocalMfiDocuments).
+        require(localMfiCertificateUri.isNullOrBlank() == localMfiPrivateKeyUri.isNullOrBlank()) {
+            "The local MFi documents must be selected together: a certificate and a private key"
         }
         require(
             mfiTarget != MfiTarget.LOCAL_FILES ||
-                localMfiCertificateUri?.startsWith("content://") == true,
+                localMfiCertificateUri == null ||
+                localMfiCertificateUri.startsWith("content://"),
         ) {
             "The local MFi certificate must use an Android content URI"
         }
         require(
             mfiTarget != MfiTarget.LOCAL_FILES ||
-                localMfiPrivateKeyUri?.startsWith("content://") == true,
+                localMfiPrivateKeyUri == null ||
+                localMfiPrivateKeyUri.startsWith("content://"),
         ) {
             "The local MFi private key must use an Android content URI"
         }

@@ -37,6 +37,7 @@ import com.shilapi.xcertplay.iap2.wire.Iap2Frame
 import com.shilapi.xcertplay.media.CarPlayMediaSessionBridge
 import com.shilapi.xcertplay.mfi.Iap2MfiAuthenticationClient
 import com.shilapi.xcertplay.mfi.LocalMfiAuthenticationClient
+import com.shilapi.xcertplay.mfi.LocalMfiDocuments
 import com.shilapi.xcertplay.mfi.MfiAuthenticationClient
 import com.shilapi.xcertplay.mfi.MfiAuthenticator
 import com.shilapi.xcertplay.mfi.RemoteMfiAuthenticationClient
@@ -563,14 +564,14 @@ class CarPlayController(
     private fun openLocalMfi() {
         executor.execute {
             try {
-                val resolver = appContext.contentResolver
-                val certificateUri = Uri.parse(checkNotNull(config.localMfiCertificateUri))
-                val privateKeyUri = Uri.parse(checkNotNull(config.localMfiPrivateKeyUri))
-                val client = resolver.openInputStream(certificateUri)?.use { certificateInput ->
-                    resolver.openInputStream(privateKeyUri)?.use { privateKeyInput ->
-                        LocalMfiAuthenticationClient.load(certificateInput, privateKeyInput)
-                    } ?: throw IOException("Could not open the selected local MFi private key")
-                } ?: throw IOException("Could not open the selected local MFi certificate")
+                val client = openLocalMfiAuthenticationClient()
+                    ?: throw IOException(
+                        "No local MFi certificate: choose both documents in Settings, or place " +
+                            "${LocalMfiDocuments.CERTIFICATE_FILE_NAME} and " +
+                            "${LocalMfiDocuments.PRIVATE_KEY_FILE_NAME} in " +
+                            LocalMfiDocuments.candidates(appContext)
+                                .joinToString(" or ") { it.displayPath },
+                    )
                 val protocolMajor = client.protocolMajor()
                 if (closed || phase != Phase.MFI) return@execute
                 mfiSession = MfiSession(client, null)
@@ -579,6 +580,32 @@ class CarPlayController(
                 startPhone()
             } catch (error: Throwable) {
                 fail(error)
+            }
+        }
+    }
+
+    /**
+     * Loads the local MFi material from wherever this deployment put it: the two documents chosen
+     * through the system picker when both are configured, otherwise the first fixed directory that
+     * holds a readable pair. Documents win because choosing them is an explicit act; the fixed
+     * directories exist for head units whose picker cannot hand out a certificate at all.
+     */
+    private fun openLocalMfiAuthenticationClient(): LocalMfiAuthenticationClient? {
+        val certificateUri = config.localMfiCertificateUri
+        val privateKeyUri = config.localMfiPrivateKeyUri
+        if (!certificateUri.isNullOrBlank() && !privateKeyUri.isNullOrBlank()) {
+            val resolver = appContext.contentResolver
+            return resolver.openInputStream(Uri.parse(certificateUri))?.use { certificateInput ->
+                resolver.openInputStream(Uri.parse(privateKeyUri))?.use { privateKeyInput ->
+                    LocalMfiAuthenticationClient.load(certificateInput, privateKeyInput)
+                } ?: throw IOException("Could not open the selected local MFi private key")
+            } ?: throw IOException("Could not open the selected local MFi certificate")
+        }
+        val source = LocalMfiDocuments.resolve(appContext) ?: return null
+        debugLog("mfi local files source=${source.displayPath}")
+        return source.certificate.inputStream().use { certificateInput ->
+            source.privateKey.inputStream().use { privateKeyInput ->
+                LocalMfiAuthenticationClient.load(certificateInput, privateKeyInput)
             }
         }
     }
