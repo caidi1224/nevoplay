@@ -5,6 +5,7 @@ import android.media.AudioFormat as AndroidAudioFormat
 import android.media.AudioManager
 import android.media.AudioRecord
 import android.media.MediaRecorder
+import android.util.Log
 import java.io.ByteArrayOutputStream
 import java.io.Closeable
 import java.util.concurrent.atomic.AtomicBoolean
@@ -69,11 +70,23 @@ object MicrophoneGain {
         (peak.coerceIn(0, 32_768) * 100 / 32_768).coerceIn(0, 100)
 }
 
-/** Keeps communication mode active until every microphone recorder has closed. */
+/**
+ * Keeps a communication audio mode active until every microphone recorder has closed.
+ *
+ * The mode is what routes the capture to the car's microphone, so it is worth asking for - but
+ * failing to enter it must not cost the uplink. During a hands-free call the telephony stack
+ * already owns the mode ([android.media.AudioManager.MODE_IN_CALL]), and that is both a
+ * communication mode and the one the call's own routing is built on. Treating only
+ * [android.media.AudioManager.MODE_IN_COMMUNICATION] as success aborted the capture there, so the
+ * other party heard nothing at all - worse than an imperfect route, and exactly what a device log
+ * shows happening on a call.
+ */
 internal class AudioModeLeaseManager(
     private val readMode: () -> Int,
     private val writeMode: (Int) -> Unit,
     private val communicationMode: Int,
+    private val acceptableModes: Set<Int> = setOf(communicationMode),
+    private val onDegraded: (actualMode: Int) -> Unit = {},
 ) {
     private var users = 0
     private var previousMode = 0
@@ -83,10 +96,13 @@ internal class AudioModeLeaseManager(
     fun acquire(): Closeable {
         if (users == 0) {
             previousMode = readMode()
-            changedMode = previousMode != communicationMode
+            changedMode = previousMode !in acceptableModes
             if (changedMode) writeMode(communicationMode)
-            check(readMode() == communicationMode) {
-                "Android communication audio mode was not enabled"
+            val effectiveMode = readMode()
+            if (effectiveMode !in acceptableModes) {
+                // Something else owns the mode and refused ours. Capture anyway: a recorder that
+                // runs with the wrong route beats one that never starts.
+                onDegraded(effectiveMode)
             }
         }
         users++
@@ -107,6 +123,14 @@ internal class AudioModeLeaseManager(
 }
 
 internal object MicrophoneAudioMode {
+    private const val TAG = "xcertplay-usb"
+
+    /** Communication modes the uplink is happy to capture under. */
+    private val COMMUNICATION_MODES = setOf(
+        AudioManager.MODE_IN_COMMUNICATION,
+        AudioManager.MODE_IN_CALL,
+    )
+
     private var leases: AudioModeLeaseManager? = null
 
     @Synchronized
@@ -118,6 +142,14 @@ internal object MicrophoneAudioMode {
                 readMode = { audioManager.mode },
                 writeMode = { audioManager.mode = it },
                 communicationMode = AudioManager.MODE_IN_COMMUNICATION,
+                acceptableModes = COMMUNICATION_MODES,
+                onDegraded = { actualMode ->
+                    Log.w(
+                        TAG,
+                        "audio mode stayed $actualMode, not " +
+                            "${AudioManager.MODE_IN_COMMUNICATION}; starting the uplink anyway",
+                    )
+                },
             ).also { leases = it }
         }
         return manager.acquire()
