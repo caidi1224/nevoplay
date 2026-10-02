@@ -741,6 +741,12 @@ private class AudioRenderer(
     private var inputDropped = 0
     private var outputBuffers = 0
     private var firstPcmLogged = false
+    // One line every AUDIO_STATS_INTERVAL_NS saying whether the track ran dry, and which of the two
+    // failure shapes that sound alike it was. See logAudioStats().
+    private var audioStatsStartNs = System.nanoTime()
+    private var audioStatsPackets = 0
+    private var audioStatsUnderruns = 0
+    private var audioStatsDropped = 0
     // Buffered-but-unplayed audio, for the latency monitor: bytes handed to the track, the play
     // head, and (where the platform reports one) the output-latency estimate.
     private var trackBytesPerFrame = 0
@@ -968,6 +974,8 @@ private class AudioRenderer(
             .array()
 
     private fun handle(packet: AudioPacket) {
+        audioStatsPackets++
+        logAudioStats()
         val rtp = packet.rtp
         val timestampUs = sampleTimestampUs(packet.sample)
         when (format.codec) {
@@ -1132,6 +1140,43 @@ private class AudioRenderer(
         }
     }
 
+    /**
+     * The one number that says whether the track ran dry, next to the numbers that say why.
+     *
+     * `AudioTrack.getUnderrunCount` is the only direct evidence of underrun on this path - the
+     * counters around it exist because two failures sound identical from the driver's seat. An
+     * underrun with `bufferedMs` at or near zero is the track starving, and a larger track is the
+     * answer. The same silence with `queue` pinned at its cap and `codecDropped` climbing is the
+     * opposite shape - the producer is ahead of a blocking `write` - and a larger track makes that
+     * worse. Device logs showed single `decoder input unavailable ... dropped=1` events with
+     * neither number recorded, which is exactly the ambiguity this line removes.
+     */
+    private fun logAudioStats() {
+        val track = track ?: return
+        val now = System.nanoTime()
+        if (now - audioStatsStartNs < AUDIO_STATS_INTERVAL_NS) return
+        val seconds = (now - audioStatsStartNs).toDouble() / NANOS_PER_SECOND
+        val underruns = track.underrunCount
+        val framesWritten =
+            if (trackBytesPerFrame > 0) totalBytesWritten / trackBytesPerFrame else 0L
+        val bufferedFrames = (framesWritten - playbackHeadFrames(track)).coerceAtLeast(0L)
+        val bufferedMs =
+            if (format.sampleRate > 0) bufferedFrames * 1000L / format.sampleRate else 0L
+        Log.i(
+            TAG,
+            "audio stats type=${format.payloadType} codec=${format.codec} " +
+                "packets=${(audioStatsPackets / seconds).toInt()}/s " +
+                "underruns=${underruns - audioStatsUnderruns}(+$underruns) bufferedMs=$bufferedMs " +
+                "queue=${queue.size}/$MAX_QUEUED_PACKETS " +
+                "codecDropped=${inputDropped - audioStatsDropped}(+$inputDropped) " +
+                "playing=$playbackStarted",
+        )
+        audioStatsStartNs = now
+        audioStatsPackets = 0
+        audioStatsUnderruns = underruns
+        audioStatsDropped = inputDropped
+    }
+
     /** Unwraps the 32-bit play head, which the platform lets wrap roughly every 24 hours. */
     private fun playbackHeadFrames(track: AudioTrack): Long {
         val raw = track.playbackHeadPosition.toLong() and UINT32_MASK
@@ -1250,6 +1295,8 @@ private class AudioRenderer(
         const val PREBUFFER_WRITE_CHUNK_BYTES = 2 * 1024
         const val DECODED_BUFFER_LOG_INTERVAL = 50
         const val AUDIO_TIMESTAMP_INTERVAL_NS = 200_000_000L
+        /** Long enough that the line is one row per interval in a log, short enough to place a glitch. */
+        const val AUDIO_STATS_INTERVAL_NS = 5_000_000_000L
         const val NANOS_PER_SECOND = 1_000_000_000L
         const val BYTES_PER_PCM_16_SAMPLE = 2
         const val UINT32_MASK = 0xffff_ffffL
