@@ -342,6 +342,7 @@ class CarPlayHostActivity : ComponentActivity() {
     private var advancedAudioChannelMappingSupported = false
     private var advancedAudioChannelMapping = false
     @Volatile private var debugLogsEnabled = false
+    private var audioPacketCaptureEnabled = false
     private var lastStageOverlayShown: Boolean? = null
     private val recentSessionMessages = ArrayDeque<String>()
     private val RECENT_SESSION_MESSAGE_LIMIT = 256
@@ -546,6 +547,7 @@ class CarPlayHostActivity : ComponentActivity() {
                 AirPlayPersistence.loadAdvancedAudioChannelMapping(this)
         microphoneGainPercent = AirPlayPersistence.loadMicrophoneGainPercent(this)
         debugLogsEnabled = AirPlayPersistence.loadDebugLogsEnabled(this)
+        audioPacketCaptureEnabled = AirPlayPersistence.loadAudioPacketCaptureEnabled(this)
         moreGesturesToSettings = AirPlayPersistence.loadMoreGesturesToSettings(this)
         autoStartOnBoot = AirPlayPersistence.loadAutoStartOnBoot(this)
         manufacturer = AirPlayPersistence.loadManufacturer(this)
@@ -1341,6 +1343,13 @@ class CarPlayHostActivity : ComponentActivity() {
             ).apply { topMargin = dp(12) },
         )
         content.addView(
+            buildAudioPacketCaptureSection(),
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            ).apply { topMargin = dp(12) },
+        )
+        content.addView(
             menuText(
                 "build ${BuildConfig.BUILD_ID}\nlog $sessionLogDestination",
                 15f,
@@ -1958,6 +1967,7 @@ class CarPlayHostActivity : ComponentActivity() {
         AirPlayPersistence.saveModel(this, model)
         AirPlayPersistence.saveOemLabel(this, oemLabel)
         AirPlayPersistence.saveDebugLogsEnabled(this, debugLogsEnabled)
+        AirPlayPersistence.saveAudioPacketCaptureEnabled(this, audioPacketCaptureEnabled)
         AirPlayPersistence.saveMoreGesturesToSettings(this, moreGesturesToSettings)
         AirPlayPersistence.saveRightHandDrive(this, rightHandDrive)
         AirPlayPersistence.saveHideTopBar(this, hideTopBar)
@@ -2572,6 +2582,19 @@ class CarPlayHostActivity : ComponentActivity() {
             if (!checked) clearScreenLogs()
             appendLog("Debug logs ${if (debugLogsEnabled) "enabled" else "disabled"}")
             updateDebugOverlays()
+        }
+
+    private fun buildAudioPacketCaptureSection(): View =
+        settingsSwitchRow(
+            label = "Audio diagnostic capture",
+            checked = audioPacketCaptureEnabled,
+            description = "Capture encrypted UDP and decrypted RTP audio packets for diagnostics; " +
+                "takes effect on the next connection",
+        ) { checked ->
+            audioPacketCaptureEnabled = checked
+            appendLog(
+                "Audio diagnostic capture ${if (audioPacketCaptureEnabled) "enabled" else "disabled"}",
+            )
         }
 
     private fun buildMicrophoneGainSection(): View {
@@ -4118,7 +4141,9 @@ class CarPlayHostActivity : ComponentActivity() {
     }
 
     private fun audioCaptureDirectory(): File? {
-        if (!File(filesDir, AUDIO_CAPTURE_MARKER).isFile) return null
+        // Two ways in on purpose: the settings switch, and the marker file an adb `run-as` session can
+        // create on a build nobody is sitting in front of.
+        if (!audioPacketCaptureEnabled && !File(filesDir, AUDIO_CAPTURE_MARKER).isFile) return null
         return File(filesDir, AUDIO_CAPTURE_DIRECTORY)
     }
 
