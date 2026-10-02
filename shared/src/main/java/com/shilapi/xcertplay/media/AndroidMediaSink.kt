@@ -345,30 +345,36 @@ private class VideoDecoder(
         }
         require(csd.isNotEmpty()) { "Missing or invalid video parameter sets" }
         val parameters = VideoParameters.parse(codec, csd)
-        val format = MediaFormat.createVideoFormat(mime, parameters.width, parameters.height).apply {
-            setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, MAX_INPUT_SIZE)
-            setByteBuffer("csd-0", ByteBuffer.wrap(csd))
-            if (pps != null) setByteBuffer("csd-1", ByteBuffer.wrap(pps))
-            // Unspecified VUI fields remain unspecified; do not force full range or BT.709.
-            if (parameters.colorStandard != -1) setInteger(MediaFormat.KEY_COLOR_STANDARD, parameters.colorStandard)
-            if (parameters.colorRange != -1) setInteger(MediaFormat.KEY_COLOR_RANGE, parameters.colorRange)
-            if (parameters.colorTransfer != -1) setInteger(MediaFormat.KEY_COLOR_TRANSFER, parameters.colorTransfer)
-            setInteger(MediaFormat.KEY_PRIORITY, 0)
+        val codecSpecificData = listOfNotNull(csd.takeIf { it.isNotEmpty() }, pps)
+        // A vendor decoder can answer BAD_VALUE to the tuned keys (input size, priority, colour, low
+        // latency), and a single rejected configure used to leave this decoder restarting for every
+        // frame that followed. Walk down: tuned, then minimal, then the software decoder by name.
+        val attempts = buildList {
+            add(DecoderAttempt(codecName = null, tuned = true))
+            add(DecoderAttempt(codecName = null, tuned = false))
+            softwareDecoderName(mime)?.let { add(DecoderAttempt(codecName = it, tuned = false)) }
         }
-        val next = createDecoder(mime)
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
-                next.codecInfo.getCapabilitiesForType(mime)
-                    .isFeatureSupported(MediaCodecInfo.CodecCapabilities.FEATURE_LowLatency)
-            ) {
-                format.setInteger(MediaFormat.KEY_LOW_LATENCY, 1)
-                lowLatencyApplied = true
+        var next: MediaCodec? = null
+        var lastFailure: Exception? = null
+        for (attempt in attempts) {
+            val configured = tryConfigureDecoder(
+                attempt = attempt,
+                mime = mime,
+                parameters = parameters,
+                codecSpecificData = codecSpecificData,
+                surface = surface,
+            )
+            if (configured != null) {
+                next = configured
+                break
             }
-            next.configure(format, surface, null, 0)
-            next.start()
-        } catch (error: Exception) {
-            next.release()
-            throw error
+            lastFailure = Exception(
+                "Video decoder attempt failed name=${attempt.codecName ?: "default"} " +
+                    "tuned=${attempt.tuned}",
+            )
+        }
+        if (next == null) {
+            throw lastFailure ?: IllegalStateException("No usable video decoder for $mime")
         }
         decoder = next
         syncGate = VideoSyncGate(codec)
@@ -389,7 +395,7 @@ private class VideoDecoder(
                 return true
             }
         })
-        Log.i(TAG, "video SPS parameters=$parameters negotiated=${width}x$height inputFormat=$format")
+        Log.i(TAG, "video SPS parameters=$parameters negotiated=${width}x$height")
         renderedFrameLogged = false
         submittedFrameLogged = false
         Log.i(
@@ -397,6 +403,79 @@ private class VideoDecoder(
             "video decoder configured name=${next.name} mime=$mime " +
                 "lowLatency=$lowLatencyApplied; waiting for random access",
         )
+    }
+
+    /** One rung of the decoder ladder: which codec, and whether the tuned keys are offered. */
+    private data class DecoderAttempt(val codecName: String?, val tuned: Boolean)
+
+    /**
+     * Builds and configures one decoder, returning null when this rung is rejected.
+     *
+     * [DecoderAttempt.tuned] adds the keys asking for low latency and a large input buffer; the
+     * minimal rung drops them, because their presence is what some vendor decoders answer BAD_VALUE
+     * to. Nothing is stored here: the caller keeps the first rung that works.
+     */
+    private fun tryConfigureDecoder(
+        attempt: DecoderAttempt,
+        mime: String,
+        parameters: VideoParameters,
+        codecSpecificData: List<ByteArray>,
+        surface: Surface,
+    ): MediaCodec? {
+        val format = MediaFormat.createVideoFormat(mime, parameters.width, parameters.height).apply {
+            codecSpecificData.forEachIndexed { index, bytes ->
+                setByteBuffer("csd-$index", ByteBuffer.wrap(bytes))
+            }
+            if (attempt.tuned) {
+                setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, MAX_INPUT_SIZE)
+                setInteger(MediaFormat.KEY_PRIORITY, 0)
+                // Unspecified VUI fields remain unspecified; do not force full range or BT.709.
+                if (parameters.colorStandard != -1) {
+                    setInteger(MediaFormat.KEY_COLOR_STANDARD, parameters.colorStandard)
+                }
+                if (parameters.colorRange != -1) {
+                    setInteger(MediaFormat.KEY_COLOR_RANGE, parameters.colorRange)
+                }
+                if (parameters.colorTransfer != -1) {
+                    setInteger(MediaFormat.KEY_COLOR_TRANSFER, parameters.colorTransfer)
+                }
+            }
+        }
+        var candidate: MediaCodec? = null
+        return try {
+            val codec = attempt.codecName?.let { MediaCodec.createByCodecName(it) }
+                ?: createDecoder(mime)
+            candidate = codec
+            lowLatencyApplied = false
+            if (attempt.tuned &&
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
+                codec.codecInfo.getCapabilitiesForType(mime)
+                    .isFeatureSupported(MediaCodecInfo.CodecCapabilities.FEATURE_LowLatency)
+            ) {
+                format.setInteger(MediaFormat.KEY_LOW_LATENCY, 1)
+                lowLatencyApplied = true
+            }
+            codec.configure(format, surface, null, 0)
+            codec.start()
+            codec
+        } catch (error: Exception) {
+            runCatching { candidate?.release() }
+            Log.w(
+                TAG,
+                "video decoder attempt rejected name=${attempt.codecName ?: "default"} " +
+                    "tuned=${attempt.tuned} mime=$mime size=${width}x$height",
+                error,
+            )
+            null
+        }
+    }
+
+    /** The platform's software decoder for [mime], if this build has one. */
+    private fun softwareDecoderName(mime: String): String? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return null
+        return MediaCodecList(MediaCodecList.REGULAR_CODECS).codecInfos.firstOrNull {
+            !it.isEncoder && it.isSoftwareOnly && mime in it.supportedTypes
+        }?.name
     }
 
     private fun createDecoder(mime: String): MediaCodec {
