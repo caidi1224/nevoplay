@@ -39,9 +39,12 @@ class AndroidMediaSink(
     private val microphoneGainPercent: Int = MicrophoneGain.DEFAULT_PERCENT,
     mediaMetricsMonitor: MediaMetricsMonitor? = null,
     onScreenStreamActiveChanged: ((Int, Boolean) -> Unit)? = null,
+    onVideoFrameRendered: (() -> Unit)? = null,
 ) : MediaSink {
     private val defaultSurface = surface
     @Volatile private var screenStreamActiveChanged = onScreenStreamActiveChanged
+    @Volatile private var videoFrameRendered = onVideoFrameRendered
+    @Volatile private var firstFrameRendered = false
     private val surfaces = ConcurrentHashMap<Int, Surface>()
     private val videoDecoders = ConcurrentHashMap<Int, VideoDecoder>()
     private val audioRenderers = ConcurrentHashMap<Int, AudioRenderer>()
@@ -62,6 +65,16 @@ class AndroidMediaSink(
 
     fun clearSurface(type: Int, surface: Surface) {
         if (surfaces.remove(type, surface)) videoDecoders[type]?.setSurface(null)
+    }
+
+    /**
+     * Replaces the first-frame listener. A host that adopts a background session installs its own
+     * listener here, and the session has usually rendered already, so a latched frame is replayed
+     * once: the wireless watchdog needs that proof even when the frame arrived before the takeover.
+     */
+    fun setVideoFrameRenderedListener(listener: (() -> Unit)?) {
+        videoFrameRendered = listener
+        if (listener != null && firstFrameRendered) listener.invoke()
     }
 
     fun setScreenStreamActiveChangedListener(listener: ((Int, Boolean) -> Unit)?) {
@@ -153,6 +166,10 @@ class AndroidMediaSink(
                 preferSoftwareHevcDecoder,
                 mediaMetricsMonitor,
                 requestKeyFrame = { videoRecoveryHandlers[type]?.invoke() ?: false },
+                onFirstFrameRendered = {
+                    firstFrameRendered = true
+                    videoFrameRendered?.invoke()
+                },
             )
         }
 
@@ -183,6 +200,7 @@ private class VideoDecoder(
     private val preferSoftwareHevcDecoder: Boolean,
     mediaMetricsMonitor: MediaMetricsMonitor?,
     private val requestKeyFrame: () -> Boolean,
+    private val onFirstFrameRendered: () -> Unit,
 ) : Closeable {
     private val queue = VideoWorkQueue<VideoJob>(8)
     @Volatile private var running = true
@@ -594,6 +612,10 @@ private class VideoDecoder(
                     if (render && !renderedFrameLogged) {
                         renderedFrameLogged = true
                         Log.i(TAG, "video decoder rendered first frame bytes=${info.size}")
+                        // Proof that this session is live, for the host's wireless handoff
+                        // watchdog: some iPhones never open the tunnel control channel even
+                        // though the picture is already on screen.
+                        onFirstFrameRendered()
                     }
                     if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) return
                 }

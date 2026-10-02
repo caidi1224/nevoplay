@@ -223,6 +223,8 @@ class CarPlayController(
     private val wirelessHandoffRequested = AtomicBoolean(false)
     private val wirelessTunnelReady = AtomicBoolean(false)
     private val wirelessActiveReported = AtomicBoolean(false)
+    /** Set once a decoded video frame has actually reached the screen for this attempt. */
+    private val wirelessVideoRendered = AtomicBoolean(false)
     private val wirelessGeneration = AtomicInteger(0)
     private val nowPlaying = Iap2NowPlayingAccumulator()
 
@@ -318,6 +320,14 @@ class CarPlayController(
 
     fun hasActiveAirPlayAttachment(): Boolean = synchronized(lifecycleLock) {
         !closed && vpnService?.isAttached() == true
+    }
+
+    /**
+     * Told by the host when a decoded video frame has reached the screen. Used by the wireless
+     * handoff watchdog as proof that the session is live when the type-130 tunnel never opens.
+     */
+    fun onVideoFrameRendered() {
+        wirelessVideoRendered.set(true)
     }
 
     fun start() {
@@ -903,6 +913,7 @@ class CarPlayController(
         wirelessHandoffRequested.set(false)
         wirelessTunnelReady.set(false)
         wirelessActiveReported.set(false)
+        wirelessVideoRendered.set(false)
         onStatus(CarPlayStatus.StartingHotspot)
         val generation = wirelessGeneration.incrementAndGet()
         executor.execute {
@@ -1247,6 +1258,18 @@ class CarPlayController(
                             generation != wirelessGeneration.get() ||
                             wirelessActiveReported.get()
                         ) {
+                            return@Thread
+                        }
+                        if (wirelessVideoRendered.get()) {
+                            // Some iPhone/firmware combinations never open the type-130 tunnel
+                            // although video is already flowing. Tearing a rendering session
+                            // down is what the user sees as a reconnect loop, so keep the
+                            // Bluetooth control channel and treat the session as live (DiPlay #73).
+                            debugLog(
+                                "wireless handoff: tunnel iAP2 never opened, but video is " +
+                                    "rendering; keeping the Bluetooth control channel",
+                            )
+                            wirelessActiveReported.compareAndSet(false, true)
                             return@Thread
                         }
                         closeWirelessStack()
@@ -1848,6 +1871,7 @@ class CarPlayController(
         wirelessHandoffRequested.set(false)
         wirelessTunnelReady.set(false)
         wirelessActiveReported.set(false)
+        wirelessVideoRendered.set(false)
 
         if (service != null) closeBestEffort("AirPlay service") { service.detach() }
     }

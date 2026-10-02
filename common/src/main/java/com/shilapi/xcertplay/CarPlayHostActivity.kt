@@ -4086,6 +4086,7 @@ class CarPlayHostActivity : ComponentActivity() {
         onScreenStreamActiveChanged = { type, active ->
             onScreenStreamStateChanged(controllerGeneration, type, active)
         },
+        onVideoFrameRendered = { onVideoFrameRendered(controllerGeneration) },
     )
 
     private fun createMediaEngine(sink: AndroidMediaSink): CarPlayMediaEngine =
@@ -4195,6 +4196,7 @@ class CarPlayHostActivity : ComponentActivity() {
         snapshot.sink.setScreenStreamActiveChangedListener { type, active ->
             onScreenStreamStateChanged(restartGeneration, type, active)
         }
+        snapshot.sink.setVideoFrameRenderedListener { onVideoFrameRendered(restartGeneration) }
         currentSurface?.let(::attachSurface)
         val serviceReused = snapshot.controller.hasActiveAirPlayAttachment()
         appendLog(
@@ -4807,6 +4809,18 @@ class CarPlayHostActivity : ComponentActivity() {
             },
             TOUCH_STATS_WINDOW_MILLIS,
         )
+    }
+
+    /**
+     * Forwards the sink's first rendered frame to the controller that owns this generation. The
+     * controller's wireless watchdog uses it to tell "the tunnel never opened" from "nothing works
+     * yet", and leaves a session that is already on screen alone.
+     */
+    private fun onVideoFrameRendered(generation: Int) {
+        runOnUiThread {
+            if (shuttingDown.get() || generation != restartGeneration) return@runOnUiThread
+            controller?.onVideoFrameRendered()
+        }
     }
 
     private fun onScreenStreamStateChanged(generation: Int, type: Int, active: Boolean) {
