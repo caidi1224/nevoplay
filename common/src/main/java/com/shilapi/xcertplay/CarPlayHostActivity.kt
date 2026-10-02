@@ -69,6 +69,7 @@ import com.shilapi.xcertplay.host.R
 import com.shilapi.xcertplay.location.AndroidCarPlayLocationProvider
 import com.shilapi.xcertplay.media.AndroidMediaSink
 import com.shilapi.xcertplay.media.CarPlayTouchMapper
+import com.shilapi.xcertplay.media.MediaMetricsMonitor
 import com.shilapi.xcertplay.media.MainMediaAudioBuffer
 import com.shilapi.xcertplay.media.MicrophoneGain
 import com.shilapi.xcertplay.media.MicrophoneLevelMonitor
@@ -293,6 +294,8 @@ class CarPlayHostActivity : ComponentActivity() {
     private var localMfiCertificateDocumentView: TextView? = null
     private var localMfiPrivateKeyDocumentView: TextView? = null
     private var localMfiStatusView: TextView? = null
+    private var mediaMetricsOverlay: MediaMetricsOverlayView? = null
+    private var mediaMetricsMonitor: MediaMetricsMonitor? = null
     private var settingsBaseline: SettingsBaseline? = null
     private var locationReportingSwitch: HostToggle? = null
     private var microphoneGainSeekBar: HostSlider? = null
@@ -346,6 +349,7 @@ class CarPlayHostActivity : ComponentActivity() {
     private var advancedAudioChannelMapping = false
     @Volatile private var debugLogsEnabled = false
     private var audioPacketCaptureEnabled = false
+    private var mediaMetricsEnabled = false
     private var lastStageOverlayShown: Boolean? = null
     private val recentSessionMessages = ArrayDeque<String>()
     private val RECENT_SESSION_MESSAGE_LIMIT = 256
@@ -553,6 +557,7 @@ class CarPlayHostActivity : ComponentActivity() {
         mainMediaAudioBufferDurationMs = AirPlayPersistence.loadMainMediaAudioBufferDurationMs(this)
         debugLogsEnabled = AirPlayPersistence.loadDebugLogsEnabled(this)
         audioPacketCaptureEnabled = AirPlayPersistence.loadAudioPacketCaptureEnabled(this)
+        mediaMetricsEnabled = AirPlayPersistence.loadMediaMetricsEnabled(this)
         moreGesturesToSettings = AirPlayPersistence.loadMoreGesturesToSettings(this)
         autoStartOnBoot = AirPlayPersistence.loadAutoStartOnBoot(this)
         manufacturer = AirPlayPersistence.loadManufacturer(this)
@@ -766,6 +771,12 @@ class CarPlayHostActivity : ComponentActivity() {
             ),
         )
         contentRoot = root
+        // The metrics overlay is a third of the panel and does not re-lay-out itself on a resize.
+        root.addOnLayoutChangeListener { _, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom ->
+            if (right - left != oldRight - oldLeft || bottom - top != oldBottom - oldTop) {
+                updateMediaMetricsOverlayLayout(right - left, bottom - top)
+            }
+        }
         videoView = video
         gestureOverlay = gestureLayer
         buildThemedOverlays(root)
@@ -1339,6 +1350,13 @@ class CarPlayHostActivity : ComponentActivity() {
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT,
             ).apply { topMargin = dp(40) },
+        )
+        content.addView(
+            buildMediaMetricsSection(),
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            ).apply { topMargin = dp(12) },
         )
         content.addView(
             buildDebugLogsSection(),
@@ -1981,6 +1999,7 @@ class CarPlayHostActivity : ComponentActivity() {
         AirPlayPersistence.saveOemLabel(this, oemLabel)
         AirPlayPersistence.saveDebugLogsEnabled(this, debugLogsEnabled)
         AirPlayPersistence.saveAudioPacketCaptureEnabled(this, audioPacketCaptureEnabled)
+        AirPlayPersistence.saveMediaMetricsEnabled(this, mediaMetricsEnabled)
         AirPlayPersistence.saveMoreGesturesToSettings(this, moreGesturesToSettings)
         AirPlayPersistence.saveRightHandDrive(this, rightHandDrive)
         AirPlayPersistence.saveHideTopBar(this, hideTopBar)
@@ -2585,6 +2604,17 @@ class CarPlayHostActivity : ComponentActivity() {
             requestLocationPermission()
         }
     }
+
+    private fun buildMediaMetricsSection(): View =
+        settingsSwitchRow(
+            label = "Media latency monitor",
+            checked = mediaMetricsEnabled,
+            description = "Show live video latency, frame rate, and audio latency",
+        ) { checked ->
+            mediaMetricsEnabled = checked
+            appendLog("Media latency monitor ${if (checked) "enabled" else "disabled"}")
+            updateMediaMetricsOverlay()
+        }
 
     private fun buildDebugLogsSection(): View =
         settingsSwitchRow(
@@ -4047,6 +4077,7 @@ class CarPlayHostActivity : ComponentActivity() {
         preferSoftwareHevcDecoder = hevcSoftwareDecoderEnabled,
         advancedAudioChannelMapping = advancedAudioChannelMapping,
         mainMediaAudioBufferDurationMs = mainMediaAudioBufferDurationMs,
+        mediaMetricsMonitor = mediaMetricsMonitor,
         microphoneGainPercent = microphoneGainPercent,
         onScreenStreamActiveChanged = { type, active ->
             onScreenStreamStateChanged(controllerGeneration, type, active)
@@ -4147,6 +4178,7 @@ class CarPlayHostActivity : ComponentActivity() {
         }
         controller = snapshot.controller
         sink = snapshot.sink
+        snapshot.sink.setMediaMetricsMonitor(mediaMetricsMonitor)
         if (snapshot.width > 0 && snapshot.height > 0) {
             activeDisplaySize = DisplaySize(snapshot.width, snapshot.height)
             controllerDisplaySize = activeDisplaySize
@@ -4824,6 +4856,62 @@ class CarPlayHostActivity : ComponentActivity() {
                     "debugLogs=$debugLogsEnabled menu=$menuOpen active=$activeScreenStreamTypes",
             )
         }
+        updateMediaMetricsOverlay()
+    }
+
+    /**
+     * Attaches, detaches or hides the latency chart. It follows the same rule as the other overlays:
+     * never on top of the picture while the settings panel is open or the safe-area editor is up.
+     */
+    private fun updateMediaMetricsOverlay() {
+        val root = contentRoot as? ViewGroup ?: return
+        if (!mediaMetricsEnabled) {
+            sink?.setMediaMetricsMonitor(null)
+            mediaMetricsOverlay?.let(root::removeView)
+            mediaMetricsOverlay = null
+            mediaMetricsMonitor = null
+            return
+        }
+        val monitor = mediaMetricsMonitor ?: MediaMetricsMonitor().also {
+            mediaMetricsMonitor = it
+        }
+        sink?.setMediaMetricsMonitor(monitor)
+        // The frame-rate axis follows the configured target, which the settings menu can change
+        // while this overlay stays alive.
+        val overlay = mediaMetricsOverlay ?: MediaMetricsOverlayView(
+            this,
+            monitor,
+            fpsAxisMax = { fps.toFloat() },
+        ).also {
+            mediaMetricsOverlay = it
+            val settingsIndex = root.indexOfChild(settingsMenu)
+            root.addView(
+                it,
+                if (settingsIndex >= 0) settingsIndex else root.childCount,
+                mediaMetricsOverlayLayoutParams(root.width, root.height),
+            )
+        }
+        overlay.visibility = if (!menuOpen && !safeAreaEditorActive) View.VISIBLE else View.GONE
+        updateMediaMetricsOverlayLayout(root.width, root.height)
+    }
+
+    private fun updateMediaMetricsOverlayLayout(screenWidth: Int, screenHeight: Int) {
+        val overlay = mediaMetricsOverlay ?: return
+        val desired = mediaMetricsOverlayLayoutParams(screenWidth, screenHeight)
+        val current = overlay.layoutParams
+        if (current.width != desired.width || current.height != desired.height) {
+            overlay.layoutParams = desired
+        }
+    }
+
+    private fun mediaMetricsOverlayLayoutParams(
+        screenWidth: Int,
+        screenHeight: Int,
+    ): FrameLayout.LayoutParams {
+        val fallback = resources.displayMetrics
+        val panelWidth = (screenWidth.takeIf { it > 0 } ?: fallback.widthPixels) / 3
+        val panelHeight = (screenHeight.takeIf { it > 0 } ?: fallback.heightPixels) / 3
+        return FrameLayout.LayoutParams(panelWidth, panelHeight, Gravity.TOP or Gravity.START)
     }
 
     private fun appendLog(message: String) {
