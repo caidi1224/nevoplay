@@ -929,33 +929,36 @@ class CarPlayHostActivity : ComponentActivity() {
      * Bars and window background only - no hide or show request, so this can run on a theme change
      * without joining the fight over who owns the bars.
      *
-     * The icon tint goes out twice on API 30+: once through the platform's own
-     * [WindowInsetsController] and once through androidx's compatibility wrapper. That is not
-     * belt-and-braces for its own sake - on this vehicle the wrapper is the half that does not
-     * arrive. `WindowInsetsControllerCompat(window, view)` builds androidx's Impl30 from the Window,
-     * and with a Window in hand `setAppearanceLight*` writes the deprecated
-     * `View.setSystemUiVisibility` flag instead of calling `setSystemBarsAppearance`; the head unit
-     * honours the window's status bar colour (which is why the bars follow the palette at all) but
-     * not that legacy flag, so a light theme kept white icons on an off-white bar.
+     * The bars are black in both themes, and that is not a leftover: the icon colour is the half of
+     * this pair that cannot be moved on this vehicle, so the background has to follow the icons
+     * rather than the palette.
+     *
+     * What was measured on 启源OS 2.2: the window's status bar colour is honoured at runtime (with
+     * the light palette the bar really did come up off-white), but neither way of asking for dark
+     * icons is. The deprecated `View.setSystemUiVisibility` flag that androidx's compatibility
+     * wrapper writes when it is built from a Window is ignored, and so is the platform's own
+     * `WindowInsetsController.setSystemBarsAppearance` on API 30+ - that was tried, and the light
+     * theme still came up with white icons. The theme's `windowLightStatusBar=false` is therefore
+     * the only value in play, and a theme cannot follow the palette here: `uiMode` is in
+     * `configChanges`, so the activity is never recreated and the theme is read once.
+     *
+     * Light icons need a dark bar in every theme. `Theme.Xcertplay` already declares exactly that,
+     * so this keeps the declared and applied values in agreement. The light palette still paints
+     * everything the app draws itself.
      */
     @Suppress("DEPRECATION")
     private fun applySystemBarPalette() {
-        window.statusBarColor = MENU_BACKGROUND
-        window.navigationBarColor = MENU_BACKGROUND
-        window.decorView.setBackgroundColor(MENU_BACKGROUND)
-        // Dark palette means dark bars, so the icons have to be light - and the other way round.
-        val darkBars = darkMode
+        window.statusBarColor = Color.BLACK
+        window.navigationBarColor = Color.BLACK
+        window.decorView.setBackgroundColor(Color.BLACK)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             val lightIcons = WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or
                 WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
-            window.insetsController?.setSystemBarsAppearance(
-                if (darkBars) 0 else lightIcons,
-                lightIcons,
-            )
+            window.insetsController?.setSystemBarsAppearance(0, lightIcons)
         }
         val controller = WindowInsetsControllerCompat(window, window.decorView)
-        controller.isAppearanceLightStatusBars = !darkBars
-        controller.isAppearanceLightNavigationBars = !darkBars
+        controller.isAppearanceLightStatusBars = false
+        controller.isAppearanceLightNavigationBars = false
     }
 
     /**
