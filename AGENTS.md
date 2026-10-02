@@ -186,9 +186,24 @@ verified change and for the tests CI owns - not for finding out whether the code
 compiles.
 
 ```bash
-source ~/.dsh/xcertplay-signing.env        # fork key, so the APK is installable
-./gradlew clean :mobile:assembleDebug      # clean first, then build, in one invocation
+source ~/.dsh/xcertplay-signing.env     # fork key, so the APK is installable
+./gradlew clean verifyAutomotive        # unit tests + lint + automotive debug APK
+./gradlew clean verifyMobile            # the same chain for the mobile app
 ```
+
+`verifyAutomotive` and `verifyMobile` are the whole chain in one task, so it cannot
+be half-remembered: `:shared` unit tests, lint for `:common`, `:mobile` and
+`:automotive`, then that app's debug APK. **Put `clean` first on the command line**
+when a from-scratch build is wanted; that is the only ordering Gradle guarantees.
+`clean` is deliberately *not* a dependency of those tasks: it writes the same
+directories as the build, and ordering it against only some of those tasks loses the
+race against the resource and signing tasks it does not name. Stale-output failures
+in an incremental build are handled automatically by `purgeStaleClassCopies`, which
+runs inside each module before its own toolchain starts.
+
+In this working copy the resulting APK also carries the MFi documents from `cert/`
+when that directory exists, which is what the head unit needs to authenticate - no
+`-P` arguments to forget.
 
 **Clean in the same invocation as every verification or APK build.** Incremental
 outputs go stale in this project - a build that fails half way leaves numbered
@@ -300,7 +315,7 @@ and the bar-state logging in this fork came to exist.
 - 提交信息沿用现有风格：`feat:`、`fix(scope):`、`opti:`、`chore:`、`update README.md`，版本号提交直接写 `1.3.0`。
 - **每交付一个改动，版本号末尾的小版本号 +1**（`1.3.1` → `1.3.1.1` → `1.3.1.2`…），不重复使用已经构建过的值；合并上游后以新的三段版本为基准重新从 `.1` 开始。两个数字集中在 `gradle/libs.versions.toml`（`xcertplayVersionName` / `xcertplayVersionCode`），mobile 与 automotive 都从那里读取，不会各写一份。
 - 每个构建还带 `BuildConfig.BUILD_ID`（提交号 `[+run<CI运行号>]`）：写在会话日志**首行**，也显示在 设置 → 诊断 里——这是判断“车上装的是哪一版、日志出自哪一版”的依据。
-- **推送前必须先本地编译验证**（JDK 25 与 Android SDK 已装好，见上文），并且**每次验证/出包都要在同一条命令里先 clean**：`./gradlew clean :mobile:assembleDebug`。这个项目的增量产物会陈旧（构建中途失败会留下 `名字 2.class` 这类编号副本），代价是下一次不相关的构建报重复类（`FooKt 2.class`、`D8: Type ... is defined multiple times`、`... already exists, it cannot be overwritten by SerializableChange`）。clean 只花几秒，能从根上避开这一类失败；根项目还注册了 `purgeStaleClassCopies`，在每个模块 `preBuild` 前删掉这些编号副本，但那是第二道防线，不是第一道。CI 只负责单元测试与留档产物，不用来“发现编译不过”。
+- **推送前必须先本地编译验证**（JDK 25 与 Android SDK 已装好，见上文），并且**每次验证/出包都用同一条命令先 clean**：车机版 `./gradlew clean verifyAutomotive`，手机版 `./gradlew clean verifyMobile`（任务是 `:shared` 单测 + 三个模块 lint + 出包；**clean 必须写在命令行第一位**，那是 Gradle 唯一保证的先后关系——clean 与构建写同一批目录，用任务级 `mustRunAfter` 只压住一部分任务会输给资源与签名任务；增量构建的陈旧产物由 `purgeStaleClassCopies` 自动兜底）。本机存在 `cert/` 时，出来的包会自动带上内置 MFi 证书，不需要再记 `-P` 参数。这个项目的增量产物会陈旧（构建中途失败会留下 `名字 2.class` 这类编号副本），代价是下一次不相关的构建报重复类（`FooKt 2.class`、`D8: Type ... is defined multiple times`、`... already exists, it cannot be overwritten by SerializableChange`）。clean 只花几秒，能从根上避开这一类失败；根项目还注册了 `purgeStaleClassCopies`，在每个模块 `preBuild` 前删掉这些编号副本，但那是第二道防线，不是第一道。CI 只负责单元测试与留档产物，不用来“发现编译不过”。
 - **撤销已推送的改动**：单个提交用 `git revert <sha>`；但**连续 revert 多个提交通常会冲突**，因为每个提交都改了 `libs.versions.toml`。要退回旧状态就用 `git checkout <旧提交> -- <文件>` 恢复文件后向前提交，并且**仍要使用一个全新的版本号**（已构建过的值不能复用：退回 1.3.1.20 的界面是以 1.3.1.35 发布的）。动手前先 `git tag -f before-<改动> HEAD` 留个后路。
 - **签名密钥**：本机 `~/.dsh/xcertplay-fork.jks`（600）+ `~/.dsh/xcertplay-signing.env`；GitHub secrets 里的副本**读不回来**，密钥丢了只能轮换，代价是每台车卸载重装一次。当前证书指纹 `744abb75…85405e`。
 - **CI 工作流**：`.github/workflows/fork-debug-apks.yml`（产物 `fork-debug-apks`），`workflow_dispatch` 已存在，**不要再加一次** —— 重复键会让 GitHub 直接拒绝整个工作流，且那次运行没有日志可看。
