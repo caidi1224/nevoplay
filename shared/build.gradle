@@ -31,6 +31,14 @@ android {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
     }
+    testOptions {
+        unitTests {
+            // The JVM tests drive real code paths, and Android's stub jar throws on every Log call
+            // unless the stubs are told to return defaults. Without this, a test that happens to
+            // cross a logging line fails on the logger instead of on its own assertions.
+            returnDefaultValues = true
+        }
+    }
 }
 dependencies {
     implementation libs.androidx.app

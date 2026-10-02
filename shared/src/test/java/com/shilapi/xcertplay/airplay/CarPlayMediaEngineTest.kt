@@ -97,12 +97,12 @@ class CarPlayMediaEngineTest {
     fun microphoneStartsAfterSetupResponseWithoutWaitingForDownlinkAudio() {
         val events = mutableListOf<String>()
         val sink = object : MediaSink {
-            override fun onMicrophoneStarted(type: Int, config: MicrophoneConfig) {
-                events += "start:$type:${config.audioType}"
+            override fun onMicrophoneStarted(id: AudioStreamId, config: MicrophoneConfig) {
+                events += "start:${id.type}:${config.audioType}"
             }
 
-            override fun onMicrophoneStopped(type: Int) {
-                events += "stop:$type"
+            override fun onMicrophoneStopped(id: AudioStreamId) {
+                events += "stop:${id.type}"
             }
         }
         val session = testSession()
@@ -136,11 +136,11 @@ class CarPlayMediaEngineTest {
     fun sessionCloseStopsAnActiveMicrophone() {
         val events = mutableListOf<String>()
         val sink = object : MediaSink {
-            override fun onMicrophoneStarted(type: Int, config: MicrophoneConfig) {
+            override fun onMicrophoneStarted(id: AudioStreamId, config: MicrophoneConfig) {
                 events += "start"
             }
 
-            override fun onMicrophoneStopped(type: Int) {
+            override fun onMicrophoneStopped(id: AudioStreamId) {
                 events += "stop"
             }
         }
