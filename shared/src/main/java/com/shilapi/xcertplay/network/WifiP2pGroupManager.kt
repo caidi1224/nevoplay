@@ -311,7 +311,28 @@ class WifiP2pGroupManager(
             }
         }
         p2pManager.createGroup(channel, config, createActionListener(attempt))
-        awaitGroupCreated(attempt, deadlineNanos, timeoutMillis)
+        try {
+            awaitGroupCreated(attempt, deadlineNanos, timeoutMillis)
+        } catch (failure: IOException) {
+            // Still refused after clearing the group. If the framework also reports that no group
+            // exists, there is nothing left for us to clear and the refusal will not change by asking
+            // again: the P2P state machine is wedged. Name that, so the host can slow its retries and
+            // tell the driver instead of hammering the framework - a device log showed 1463 bring-up
+            // attempts and 1131 refused removeGroups over three and a half hours, which only ended
+            // when the framework happened to free the group on its own.
+            val stillRefused = synchronized(stateLock) {
+                attempt.createFailureReason == WifiP2pManager.BUSY ||
+                    attempt.createFailureReason == WifiP2pManager.ERROR
+            }
+            val probe = runCatching { requestGroupInfo(attempt, channel, GROUP_PROBE_NANOS) }
+            if (stillRefused && probe.isSuccess && probe.getOrNull() == null) {
+                throw IOException(
+                    "Wi-Fi P2P is wedged: createGroup is refused while no group exists",
+                    failure,
+                )
+            }
+            throw failure
+        }
     }
 
     @RequiresApi(Build.VERSION_CODES.Q)
@@ -639,6 +660,8 @@ class WifiP2pGroupManager(
         val REMOVE_GROUP_CONFIRM_NANOS: Long = TimeUnit.MILLISECONDS.toNanos(2_000)
         const val REMOVE_GROUP_CONFIRM_POLL_MILLIS = 100L
         const val GROUP_ADOPT_PROBE_MILLIS = 500L
+        /** How long requestGroupInfo may take when deciding whether a refusal is a wedge. */
+        val GROUP_PROBE_NANOS: Long = TimeUnit.MILLISECONDS.toNanos(2_000)
         val REQUEST_POLL_NANOS: Long = TimeUnit.MILLISECONDS.toNanos(500)
         val GROUP_ADOPT_PROBE_NANOS: Long = TimeUnit.MILLISECONDS.toNanos(GROUP_ADOPT_PROBE_MILLIS)
     }

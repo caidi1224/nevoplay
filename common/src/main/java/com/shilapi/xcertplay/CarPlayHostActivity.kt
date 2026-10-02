@@ -413,6 +413,10 @@ class CarPlayHostActivity : ComponentActivity() {
     private var stackRebuildInProgress = false
     private var restartGeneration = 0
     private var reconnectScheduled = false
+    /** Attempts to rebuild the stack that have failed in a row; reset when a session comes up. */
+    private var consecutiveReconnectFailures = 0
+    /** Set once the driver has been told that Wi-Fi P2P is stuck, so it is said once. */
+    private var hotspotTroubleReported = false
     private var sessionLog: SessionLogFile? = null
     private var sessionLogDestination = ""
     private var gestureTapSwallowed = false
@@ -4107,6 +4111,9 @@ class CarPlayHostActivity : ComponentActivity() {
                         return@runOnUiThread
                     }
                     activeAirPlaySession = session
+                    // A live session is the proof that the retries worked: start counting again.
+                    consecutiveReconnectFailures = 0
+                    hotspotTroubleReported = false
                     updateSettingsLiveChip()
                     syncAirPlayDarkMode()
                     if (menuOpen) return@runOnUiThread
@@ -4170,7 +4177,7 @@ class CarPlayHostActivity : ComponentActivity() {
         if (!menuOpen && controllerGeneration == restartGeneration) {
             updateHotspotStatus(status)
             val description = status.describe()
-            setConnectionStage(description)
+            setConnectionStage(withHotspotNotice(description))
             when (status) {
                 is CarPlayStatus.Failed -> reconnectAfterLoss(description)
                 else -> Unit
@@ -4403,15 +4410,44 @@ class CarPlayHostActivity : ComponentActivity() {
         startCarPlay(size)
     }
 
+    /**
+     * Tells the driver what to do about a Wi-Fi P2P state machine that keeps refusing to create a
+     * group. Reaching into Settings to toggle Wi-Fi is not something this app may do, and repeating
+     * the same failed attempt every two seconds is not a recovery - the framework frees the old group
+     * when it gets around to it. So say it once, on the stage banner where the missing picture would
+     * have been, and keep polling slowly in the background.
+     */
+    private fun reportHotspotTrouble() {
+        if (hotspotTroubleReported || consecutiveReconnectFailures < HOTSPOT_TROUBLE_AFTER_FAILURES) {
+            return
+        }
+        hotspotTroubleReported = true
+        setStatus(
+            "Wi-Fi P2P is stuck after $consecutiveReconnectFailures attempts; " +
+                "toggle the head unit's Wi-Fi, or restart it",
+        )
+    }
+
+    /** Adds the recovery hint to every following failure line while P2P is stuck. */
+    private fun withHotspotNotice(description: String): String =
+        if (hotspotTroubleReported && description.contains("Wi-Fi P2P", ignoreCase = true)) {
+            "$description - toggle the head unit's Wi-Fi, or restart it"
+        } else {
+            description
+        }
+
     private fun reconnectAfterLoss(reason: String) {
         if (shuttingDown.get() || menuOpen || stackRebuildInProgress) return
         if (reconnectScheduled) return
         reconnectScheduled = true
         val generation = restartGeneration
+        if (reason.contains("Wi-Fi P2P", ignoreCase = true)) reportHotspotTrouble()
+        val failures = consecutiveReconnectFailures
+        consecutiveReconnectFailures = failures + 1
         val delayMillis = if (reason.contains("AirPlay iAP tunnel", ignoreCase = true)) {
             IAP_TUNNEL_RECONNECT_DELAY_MILLIS
         } else {
-            RECONNECT_DELAY_MILLIS
+            reconnectBackoffMillis(failures)
         }
         appendLog("$reason; retrying in ${delayMillis}ms")
         mainHandler.postDelayed(
@@ -5222,6 +5258,8 @@ class CarPlayHostActivity : ComponentActivity() {
         const val DISPLAY_REVERT_STRIKES = 4
         const val DISPLAY_YIELD_MILLIS = 60_000L
         const val FULLSCREEN_REASSERT_LOG_INTERVAL_MILLIS = 1_000L
+        /** Consecutive Wi-Fi P2P failures before the driver is told to help. */
+        const val HOTSPOT_TROUBLE_AFTER_FAILURES = 4
         const val RECONNECT_DELAY_MILLIS = 2_000L
         const val IAP_TUNNEL_RECONNECT_DELAY_MILLIS = 15_000L
         const val CONTROLLER_CLOSE_TIMEOUT_MILLIS = 4_000L
