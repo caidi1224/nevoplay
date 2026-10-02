@@ -31,19 +31,37 @@ fun Project.xcertplayCommitDate(): String = runCatching {
 }.getOrNull().orEmpty().ifEmpty { "unknown" }
 
 /**
- * An optional path handed to the build, from a Gradle property or the gitignored `local.properties`.
+ * An optional path handed to the build, from a Gradle property, the gitignored `local.properties`, or
+ * - for exactly the two documents below - the gitignored `cert/` directory of this working copy.
  *
- * Only the built-in MFi material is looked up this way, and deliberately so: the certificate and its
- * private key are deployment secrets, so the repository never names a path to them. A build without
- * these properties is exactly the ordinary build and carries no certificate.
+ * The certificate and its private key are deployment secrets, so the repository never names a path to
+ * them and never carries them: `cert/` is excluded locally. It is a *fallback* only, and only when
+ * both conventional file names are present, because forgetting the two `-P` arguments produced an APK
+ * that looks complete but cannot authenticate on the head unit - a failure that shows up in the car,
+ * not in the build.
  */
 fun Project.xcertplayOptionalPath(key: String): String? {
     (findProperty(key) as? String)?.takeIf { it.isNotBlank() }?.let { return it }
     val localProperties = rootProject.file("local.properties")
-    if (!localProperties.isFile) return null
-    val properties = Properties()
-    localProperties.inputStream().use(properties::load)
-    return properties.getProperty(key)?.takeIf { it.isNotBlank() }
+    if (localProperties.isFile) {
+        val properties = Properties()
+        localProperties.inputStream().use(properties::load)
+        properties.getProperty(key)?.takeIf { it.isNotBlank() }?.let { return it }
+    }
+    return null
+}
+
+/** The conventional local documents, used when nothing above named them. */
+val localMfiDocuments: Pair<String, String>? = run {
+    val certificate = rootProject.file("cert/certificate.p7b")
+    val privateKey = rootProject.file("cert/identity.pk8")
+    if (certificate.isFile && privateKey.isFile) {
+        logger.lifecycle("bundling the MFi documents found in cert/ (gitignored)")
+        // Absolute: the caller resolves these against its own project directory.
+        certificate.absolutePath to privateKey.absolutePath
+    } else {
+        null
+    }
 }
 
 /**
@@ -76,7 +94,9 @@ abstract class CopyBundledMfiDocuments : DefaultTask() {
 // their own data directory. Give both paths and `assets/mfi/mfi.p7b` + `mfi.pk8` end up in the APK;
 // give neither and this block does nothing at all.
 val bundledMfiCertificate = project.xcertplayOptionalPath("xcertplay.mfi.certificate")
+    ?: localMfiDocuments?.first
 val bundledMfiPrivateKey = project.xcertplayOptionalPath("xcertplay.mfi.privateKey")
+    ?: localMfiDocuments?.second
 if (!bundledMfiCertificate.isNullOrBlank() && !bundledMfiPrivateKey.isNullOrBlank()) {
     val copyBundledMfiDocuments = tasks.register<CopyBundledMfiDocuments>("copyBundledMfiDocuments") {
         description = "Copies this deployment's MFi certificate and key into the APK's assets."
