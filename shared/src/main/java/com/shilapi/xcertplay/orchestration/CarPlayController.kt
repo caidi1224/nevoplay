@@ -14,6 +14,7 @@ import android.content.Intent
 import android.content.ServiceConnection
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
+import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
@@ -35,6 +36,7 @@ import com.shilapi.xcertplay.iap2.session.Iap2Session
 import com.shilapi.xcertplay.iap2.wire.Iap2Frame
 import com.shilapi.xcertplay.media.CarPlayMediaSessionBridge
 import com.shilapi.xcertplay.mfi.Iap2MfiAuthenticationClient
+import com.shilapi.xcertplay.mfi.LocalMfiAuthenticationClient
 import com.shilapi.xcertplay.mfi.MfiAuthenticationClient
 import com.shilapi.xcertplay.mfi.MfiAuthenticator
 import com.shilapi.xcertplay.mfi.RemoteMfiAuthenticationClient
@@ -551,6 +553,33 @@ class CarPlayController(
                 debugLog("mfi discovery backend=Remote server=${config.remoteMfiServer.orEmpty()}")
                 openRemoteMfi()
             }
+            MfiTarget.LOCAL_FILES -> {
+                debugLog("mfi discovery backend=Local documents")
+                openLocalMfi()
+            }
+        }
+    }
+
+    private fun openLocalMfi() {
+        executor.execute {
+            try {
+                val resolver = appContext.contentResolver
+                val certificateUri = Uri.parse(checkNotNull(config.localMfiCertificateUri))
+                val privateKeyUri = Uri.parse(checkNotNull(config.localMfiPrivateKeyUri))
+                val client = resolver.openInputStream(certificateUri)?.use { certificateInput ->
+                    resolver.openInputStream(privateKeyUri)?.use { privateKeyInput ->
+                        LocalMfiAuthenticationClient.load(certificateInput, privateKeyInput)
+                    } ?: throw IOException("Could not open the selected local MFi private key")
+                } ?: throw IOException("Could not open the selected local MFi certificate")
+                val protocolMajor = client.protocolMajor()
+                if (closed || phase != Phase.MFI) return@execute
+                mfiSession = MfiSession(client, null)
+                debugLog("mfi local documents ready protocolMajor=$protocolMajor")
+                onStatus(CarPlayStatus.MfiReady)
+                startPhone()
+            } catch (error: Throwable) {
+                fail(error)
+            }
         }
     }
 
@@ -806,7 +835,7 @@ class CarPlayController(
             when (config.mfiTarget) {
                 MfiTarget.USB_CH341 -> ch341Host?.let(::checkCh341Mfi)
                 MfiTarget.I2C -> openLinuxMfi()
-                MfiTarget.REMOTE -> Unit
+                MfiTarget.REMOTE, MfiTarget.LOCAL_FILES -> Unit
             }
         }
     }

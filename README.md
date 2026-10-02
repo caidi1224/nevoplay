@@ -27,7 +27,8 @@
 
 - CarPlay host applications for Android and Android Automotive OS.
 - Support for MFI chips connected through a CH341 bridge or native
-  `/dev/i2c-N` devices, and Remote MFI authentication (see the API below).
+  `/dev/i2c-N` devices, local certificate/private-key files, and Remote MFI
+  authentication (see the API below).
 - Wired and wireless CarPlay connections.
 - CarPlay Ultra triggering (the protocol stack is untested/incomplete, but it
   can trigger the CarPlay Ultra prompt on an iPhone).
@@ -57,6 +58,19 @@ Android 9 it falls back to
 `/sdcard/Android/data/com.shilapi.xcertplay/files/logs/xcertplay.log`).
 
 Adapter board: [CH341-to-MFI](https://github.com/shilapi/ch341-to-mfi-chip)
+
+## Local MFI files
+
+Choose `Local files` under `MFI certificate & signing target`, then use the two
+`Choose` buttons to select the certificate and private key with Android's system
+document picker. The supported formats are a DER PKCS#7 certificate (`.p7b`)
+and its matching, unencrypted DER PKCS#8 private key (`.pk8`). The app validates
+that the files match before starting the phone connection and reloads them on
+MFI reconnect.
+
+Store the private key in a protected location. Neither file is copied into app
+preferences; only Android's persistent read permission and document URI are
+saved.
 
 ## Project structure
 

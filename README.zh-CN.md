@@ -23,7 +23,7 @@
 ## Features
 
 - 面向 Android 和 Android Automotive OS 的 CarPlay 主机应用。
-- 支持 CH341 桥接 MFI 芯片、原生 `/dev/i2c-N` 设备连接的 MFI芯片、Remote MFI 认证（API见下）。
+- 支持 CH341 桥接 MFI 芯片、原生 `/dev/i2c-N` 设备连接的 MFI 芯片、本地证书/私钥文件和 Remote MFI 认证（API 见下）。
 - 支持 CarPlay 有线或无线连接。
 - 支持触发 CarPlay Ultra （未测试/未完成的协议栈，但是确实可以在 iPhone 上触发 CarPlay Ultra 的提示）。
 - 支持语音、导航、音乐多通道音频输出并 mapping 至 Android 的对应通道。
@@ -46,6 +46,16 @@
 他运转👍，已在车机/手机平台测试，如果出现部分车机不适配的情况欢迎 issue （并附上你的 log ，位于 `/sdcard/Download/xcertplay/xcertplay.log`，设置页会显示确切路径；Android 9 上会退回 `/sdcard/Android/data/com.shilapi.xcertplay/files/logs/xcertplay.log`）
 
 转接板：[CH341-to-MFI](https://github.com/shilapi/ch341-to-mfi-chip)
+
+## 本地 MFI 文件
+
+在 `MFI certificate & signing target` 中选择 `Local files`，然后通过两个 `Choose`
+按钮使用 Android 系统文件选择器选择证书和私钥。当前支持 DER PKCS#7 证书（`.p7b`）
+及与之匹配的、未加密 DER PKCS#8 私钥（`.pk8`）。应用会在开始连接手机前校验两者是否
+匹配，并在 MFI 重连时重新读取文件。
+
+建议把私钥放在受保护的位置。应用不会把证书或私钥复制到偏好设置，只会保存 Android
+授予的持久读取权限和文档 URI。
 
 ## 工程结构
 

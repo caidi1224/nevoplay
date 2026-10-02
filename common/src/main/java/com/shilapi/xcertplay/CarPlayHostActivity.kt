@@ -13,11 +13,13 @@ import android.graphics.SurfaceTexture
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.StateListDrawable
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.Process
+import android.provider.OpenableColumns
 import android.provider.Settings
 import android.text.Editable
 import android.text.InputType
@@ -130,6 +132,8 @@ class CarPlayHostActivity : ComponentActivity() {
         linuxI2cPath = if (mfiTarget == MfiTarget.I2C) mfiI2cPath.trim() else null,
         remoteMfiServer = remoteMfiServer.trim().takeIf { it.isNotEmpty() },
         remoteMfiToken = remoteMfiToken.takeIf { it.isNotEmpty() },
+        localMfiCertificateUri = localMfiCertificateUri.takeIf { it.isNotEmpty() },
+        localMfiPrivateKeyUri = localMfiPrivateKeyUri.takeIf { it.isNotEmpty() },
         identification = Iap2IdentificationConfig(
             name = "xcertplay",
             modelIdentifier = normalizedModel(),
@@ -233,6 +237,24 @@ class CarPlayHostActivity : ComponentActivity() {
                 appendLog("Custom AirPlay icon updated")
             }
         }
+    private val localMfiCertificatePicker =
+        registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+            externalActivityInProgress = false
+            if (uri != null && retainDocumentReadPermission(uri, "certificate")) {
+                localMfiCertificateUri = uri.toString()
+                updateLocalMfiDocumentViews()
+                mfiErrorView?.visibility = View.GONE
+            }
+        }
+    private val localMfiPrivateKeyPicker =
+        registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+            externalActivityInProgress = false
+            if (uri != null && retainDocumentReadPermission(uri, "private key")) {
+                localMfiPrivateKeyUri = uri.toString()
+                updateLocalMfiDocumentViews()
+                mfiErrorView?.visibility = View.GONE
+            }
+        }
 
     private var videoView: TextureView? = null
     private var gestureOverlay: View? = null
@@ -258,10 +280,13 @@ class CarPlayHostActivity : ComponentActivity() {
     private var mfiTargetGroup: RadioGroup? = null
     private var mfiI2cFields: View? = null
     private var mfiRemoteFields: View? = null
+    private var mfiLocalFields: View? = null
     private var mfiErrorView: TextView? = null
     private var mfiI2cPathInput: EditText? = null
     private var remoteMfiServerInput: EditText? = null
     private var remoteMfiTokenInput: EditText? = null
+    private var localMfiCertificateDocumentView: TextView? = null
+    private var localMfiPrivateKeyDocumentView: TextView? = null
     private var settingsBaseline: SettingsBaseline? = null
     private var locationReportingSwitch: HostToggle? = null
     private var microphoneGainSeekBar: HostSlider? = null
@@ -347,6 +372,8 @@ class CarPlayHostActivity : ComponentActivity() {
     private var mfiI2cPath = AirPlayPersistence.DEFAULT_MFI_I2C_PATH
     private var remoteMfiServer = ""
     private var remoteMfiToken = ""
+    private var localMfiCertificateUri = ""
+    private var localMfiPrivateKeyUri = ""
     private var wirelessPermissionsReady = false
     private var wirelessHotspotMode = WirelessHotspotMode.WIFI_P2P
     private var manualHotspotSsid = ""
@@ -537,6 +564,8 @@ class CarPlayHostActivity : ComponentActivity() {
         mfiI2cPath = AirPlayPersistence.loadMfiI2cPath(this)
         remoteMfiServer = AirPlayPersistence.loadRemoteMfiServer(this)
         remoteMfiToken = AirPlayPersistence.loadRemoteMfiToken(this)
+        localMfiCertificateUri = AirPlayPersistence.loadLocalMfiCertificateUri(this)
+        localMfiPrivateKeyUri = AirPlayPersistence.loadLocalMfiPrivateKeyUri(this)
         wirelessHotspotMode = AirPlayPersistence.loadWirelessHotspotMode(this)
         manualHotspotSsid = AirPlayPersistence.loadManualHotspotSsid(this)
         manualHotspotPassphrase = AirPlayPersistence.loadManualHotspotPassphrase(this)
@@ -1902,6 +1931,8 @@ class CarPlayHostActivity : ComponentActivity() {
         AirPlayPersistence.saveMfiI2cPath(this, mfiI2cPath)
         AirPlayPersistence.saveRemoteMfiServer(this, remoteMfiServer)
         AirPlayPersistence.saveRemoteMfiToken(this, remoteMfiToken)
+        AirPlayPersistence.saveLocalMfiCertificateUri(this, localMfiCertificateUri)
+        AirPlayPersistence.saveLocalMfiPrivateKeyUri(this, localMfiPrivateKeyUri)
         AirPlayPersistence.saveWirelessHotspotMode(this, wirelessHotspotMode)
         AirPlayPersistence.saveManualHotspotSsid(this, manualHotspotSsid)
         AirPlayPersistence.saveManualHotspotPassphrase(this, manualHotspotPassphrase)
@@ -1999,6 +2030,7 @@ class CarPlayHostActivity : ComponentActivity() {
                 MfiTarget.USB_CH341 to "USB/CH341",
                 MfiTarget.I2C to "I2C",
                 MfiTarget.REMOTE to "Remote",
+                MfiTarget.LOCAL_FILES to "Local files",
             ),
             selected = mfiTarget,
         ) { target ->
@@ -2094,6 +2126,58 @@ class CarPlayHostActivity : ComponentActivity() {
             ).apply { topMargin = dp(8) },
         )
         mfiRemoteFields = remoteFields
+
+        val localFields = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(
+                localMfiDocumentRow(
+                    "Certificate (.p7b)",
+                    localMfiCertificateUri,
+                    onDocumentViewCreated = { localMfiCertificateDocumentView = it },
+                ) {
+                    externalActivityInProgress = true
+                    localMfiCertificatePicker.launch(arrayOf("*/*"))
+                },
+                LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                ),
+            )
+            addView(
+                localMfiDocumentRow(
+                    "Private key (.pk8)",
+                    localMfiPrivateKeyUri,
+                    onDocumentViewCreated = { localMfiPrivateKeyDocumentView = it },
+                ) {
+                    externalActivityInProgress = true
+                    localMfiPrivateKeyPicker.launch(arrayOf("*/*"))
+                },
+                LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                ).apply { topMargin = dp(8) },
+            )
+            addView(
+                menuText(
+                    "Select a DER PKCS#7 certificate and its matching unencrypted DER PKCS#8 " +
+                        "private key. Documents are reloaded when MFI reconnects.",
+                    14f,
+                    MENU_SECONDARY,
+                ),
+                LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                ).apply { topMargin = dp(4) },
+            )
+        }
+        section.addView(
+            localFields,
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            ).apply { topMargin = dp(8) },
+        )
+        mfiLocalFields = localFields
         val error = menuText("", 14f, MENU_DANGER).apply {
             visibility = View.GONE
         }
@@ -2112,7 +2196,93 @@ class CarPlayHostActivity : ComponentActivity() {
     private fun updateMfiTargetFields() {
         mfiI2cFields?.visibility = if (mfiTarget == MfiTarget.I2C) View.VISIBLE else View.GONE
         mfiRemoteFields?.visibility = if (mfiTarget == MfiTarget.REMOTE) View.VISIBLE else View.GONE
+        mfiLocalFields?.visibility = if (mfiTarget == MfiTarget.LOCAL_FILES) View.VISIBLE else View.GONE
         mfiErrorView?.visibility = View.GONE
+    }
+
+    private fun localMfiDocumentRow(
+        label: String,
+        uri: String,
+        onDocumentViewCreated: (TextView) -> Unit,
+        onChoose: () -> Unit,
+    ): View = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        addView(
+            menuText(label, 15f, MENU_SECONDARY),
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            ),
+        )
+        val row = LinearLayout(this@CarPlayHostActivity).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        val documentView = menuText(localMfiDocumentLabel(uri), 14f, MENU_SECONDARY)
+        onDocumentViewCreated(documentView)
+        row.addView(
+            documentView,
+            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
+        )
+        row.addView(
+            HostUi.chip(this@CarPlayHostActivity, "Choose").apply {
+                contentDescription = "Choose $label"
+                setOnClickListener { onChoose() }
+            },
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            ).apply { marginStart = dp(12) },
+        )
+        addView(
+            row,
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            ).apply { topMargin = dp(4) },
+        )
+    }
+
+    private fun updateLocalMfiDocumentViews() {
+        localMfiCertificateDocumentView?.text = localMfiDocumentLabel(localMfiCertificateUri)
+        localMfiPrivateKeyDocumentView?.text = localMfiDocumentLabel(localMfiPrivateKeyUri)
+    }
+
+    private fun localMfiDocumentLabel(value: String): String {
+        if (value.isEmpty()) return "Not selected"
+        val uri = try {
+            Uri.parse(value)
+        } catch (_: Exception) {
+            return "Selection unavailable"
+        }
+        return try {
+            contentResolver.query(
+                uri,
+                arrayOf(OpenableColumns.DISPLAY_NAME),
+                null,
+                null,
+                null,
+            )?.use { cursor ->
+                if (!cursor.moveToFirst()) return@use null
+                val column = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                if (column >= 0) cursor.getString(column) else null
+            } ?: uri.lastPathSegment ?: "Selected document"
+        } catch (_: Exception) {
+            uri.lastPathSegment ?: "Selected document"
+        }
+    }
+
+    private fun retainDocumentReadPermission(uri: Uri, label: String): Boolean = try {
+        contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        true
+    } catch (failure: SecurityException) {
+        Log.e(TAG, "Could not retain local MFi $label document permission", failure)
+        Toast.makeText(
+            this,
+            "Could not keep access to the selected $label",
+            Toast.LENGTH_LONG,
+        ).show()
+        false
     }
 
     private fun syncMfiSettingsControls() {
@@ -2132,6 +2302,7 @@ class CarPlayHostActivity : ComponentActivity() {
         if (remoteMfiTokenInput?.text?.toString() != remoteMfiToken) {
             remoteMfiTokenInput?.setText(remoteMfiToken)
         }
+        updateLocalMfiDocumentViews()
         updateMfiTargetFields()
     }
 
@@ -2139,6 +2310,7 @@ class CarPlayHostActivity : ComponentActivity() {
         MfiTarget.USB_CH341 -> "USB/CH341"
         MfiTarget.I2C -> "I2C"
         MfiTarget.REMOTE -> "Remote"
+        MfiTarget.LOCAL_FILES -> "Local files"
     }
 
     private fun buildIdentitySettingsSection(): View {
@@ -3159,9 +3331,15 @@ class CarPlayHostActivity : ComponentActivity() {
                 !remoteMfiServer.trim().startsWith("http://") &&
                 !remoteMfiServer.trim().startsWith("https://") ->
                 "Remote server address must start with http:// or https://"
+            mfiTarget == MfiTarget.LOCAL_FILES && localMfiCertificateUri.isBlank() ->
+                "Select a local certificate"
+            mfiTarget == MfiTarget.LOCAL_FILES && localMfiPrivateKeyUri.isBlank() ->
+                "Select a local private key"
             '\u0000' in mfiI2cPath -> "I2C device path contains U+0000"
             '\u0000' in remoteMfiServer -> "Remote server address contains U+0000"
             '\u0000' in remoteMfiToken -> "Remote token contains U+0000"
+            '\u0000' in localMfiCertificateUri -> "Local certificate URI contains U+0000"
+            '\u0000' in localMfiPrivateKeyUri -> "Local private key URI contains U+0000"
             else -> null
         }
         mfiErrorView?.text = error.orEmpty()

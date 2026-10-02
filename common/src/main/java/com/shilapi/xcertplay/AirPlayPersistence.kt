@@ -65,6 +65,8 @@ object AirPlayPersistence {
     private const val KEY_MFI_I2C_PATH = "mfi_i2c_path"
     private const val KEY_REMOTE_MFI_SERVER = "remote_mfi_server"
     private const val KEY_REMOTE_MFI_TOKEN = "remote_mfi_token"
+    private const val KEY_LOCAL_MFI_CERTIFICATE_URI = "local_mfi_certificate_uri"
+    private const val KEY_LOCAL_MFI_PRIVATE_KEY_URI = "local_mfi_private_key_uri"
     private const val SAFE_AREA_KEY_PREFIX = "safe_area_"
     private const val CUSTOM_ICON_FILE = "airplay-icon.png"
 
@@ -183,6 +185,28 @@ object AirPlayPersistence {
     fun saveRemoteMfiToken(context: Context, token: String) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .putString(KEY_REMOTE_MFI_TOKEN, token)
+            .apply()
+    }
+
+    fun loadLocalMfiCertificateUri(context: Context): String =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getString(KEY_LOCAL_MFI_CERTIFICATE_URI, null)
+            .orEmpty()
+
+    fun saveLocalMfiCertificateUri(context: Context, uri: String) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putString(KEY_LOCAL_MFI_CERTIFICATE_URI, uri)
+            .apply()
+    }
+
+    fun loadLocalMfiPrivateKeyUri(context: Context): String =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getString(KEY_LOCAL_MFI_PRIVATE_KEY_URI, null)
+            .orEmpty()
+
+    fun saveLocalMfiPrivateKeyUri(context: Context, uri: String) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putString(KEY_LOCAL_MFI_PRIVATE_KEY_URI, uri)
             .apply()
     }
 
