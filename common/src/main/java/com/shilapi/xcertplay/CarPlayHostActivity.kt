@@ -2134,7 +2134,7 @@ class CarPlayHostActivity : ComponentActivity() {
 
         // Create the app-owned directory while the user is looking at the target, so an
         // `adb push .../files/mfi/` has somewhere to land before the first connection.
-        LocalMfiDocuments.appSource(this)?.directory?.mkdirs()
+        LocalMfiDocuments.appDirectory(this)?.directory?.mkdirs()
 
         val localFields = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -2325,24 +2325,23 @@ class CarPlayHostActivity : ComponentActivity() {
         }
         val partialDocuments =
             localMfiCertificateUri.isNotBlank() || localMfiPrivateKeyUri.isNotBlank()
-        val candidates = LocalMfiDocuments.candidates(this)
-        val usable = candidates.firstOrNull {
-            LocalMfiDocuments.state(it) == LocalMfiDocuments.FixedState.USABLE
+        val sources = LocalMfiDocuments.sources(this)
+        val usable = sources.firstOrNull {
+            LocalMfiDocuments.state(it) == LocalMfiDocuments.SourceState.USABLE
         }
         if (usable != null) {
-            view.text = "Source: ${usable.displayPath} " +
-                "(${LocalMfiDocuments.CERTIFICATE_FILE_NAME} + " +
-                "${LocalMfiDocuments.PRIVATE_KEY_FILE_NAME})"
+            view.text = "Source: ${usable.displayPath}"
             view.setTextColor(MENU_SECONDARY)
             return
         }
-        val partial = candidates.firstOrNull {
-            LocalMfiDocuments.state(it) == LocalMfiDocuments.FixedState.PARTIAL
+        val partial = sources.firstOrNull {
+            LocalMfiDocuments.state(it) == LocalMfiDocuments.SourceState.PARTIAL
         }
-        if (partial != null) {
-            val names = LocalMfiDocuments.unreadableFileNames(partial).joinToString(", ")
+        if (partial is LocalMfiDocuments.DirectorySource) {
+            val names = partial.unreadableFileNames().joinToString(", ")
             view.text = "Found ${partial.displayPath}, but $names cannot be read on this Android " +
-                "version. Push the pair to ${appFilesMfiPath()} instead."
+                "version. Use a build with the certificate built in, or push the pair to " +
+                appFilesMfiPath()
             view.setTextColor(MENU_DANGER)
             return
         }
@@ -2353,13 +2352,13 @@ class CarPlayHostActivity : ComponentActivity() {
             "No certificate material yet. Choose both documents, or push " +
                 "${LocalMfiDocuments.CERTIFICATE_FILE_NAME} + " +
                 "${LocalMfiDocuments.PRIVATE_KEY_FILE_NAME} to " +
-                candidates.joinToString(" or ") { it.displayPath }
+                LocalMfiDocuments.directories(this).joinToString(" or ") { it.displayPath }
         }
         view.setTextColor(MENU_DANGER)
     }
 
     private fun appFilesMfiPath(): String =
-        LocalMfiDocuments.appSource(this)?.displayPath ?: "the app files directory"
+        LocalMfiDocuments.appDirectory(this)?.displayPath ?: "the app files directory"
 
     private fun localMfiDocumentLabel(value: String): String {
         if (value.isEmpty()) return "Not selected"
@@ -3454,7 +3453,7 @@ class CarPlayHostActivity : ComponentActivity() {
                 "No local MFi certificate: choose both documents, or push " +
                     "${LocalMfiDocuments.CERTIFICATE_FILE_NAME} + " +
                     "${LocalMfiDocuments.PRIVATE_KEY_FILE_NAME} to " +
-                    LocalMfiDocuments.candidates(this)
+                    LocalMfiDocuments.directories(this)
                         .joinToString(" or ") { it.displayPath }
             '\u0000' in mfiI2cPath -> "I2C device path contains U+0000"
             '\u0000' in remoteMfiServer -> "Remote server address contains U+0000"

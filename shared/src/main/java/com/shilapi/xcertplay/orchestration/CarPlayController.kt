@@ -569,7 +569,7 @@ class CarPlayController(
                         "No local MFi certificate: choose both documents in Settings, or place " +
                             "${LocalMfiDocuments.CERTIFICATE_FILE_NAME} and " +
                             "${LocalMfiDocuments.PRIVATE_KEY_FILE_NAME} in " +
-                            LocalMfiDocuments.candidates(appContext)
+                            LocalMfiDocuments.directories(appContext)
                                 .joinToString(" or ") { it.displayPath },
                     )
                 val protocolMajor = client.protocolMajor()
@@ -586,9 +586,10 @@ class CarPlayController(
 
     /**
      * Loads the local MFi material from wherever this deployment put it: the two documents chosen
-     * through the system picker when both are configured, otherwise the first fixed directory that
-     * holds a readable pair. Documents win because choosing them is an explicit act; the fixed
-     * directories exist for head units whose picker cannot hand out a certificate at all.
+     * through the system picker when both are configured, otherwise the first readable source — the
+     * documents built into this APK, then the fixed directories. Documents win because choosing them
+     * is an explicit act on the device; the other sources exist for head units whose picker cannot
+     * hand out a certificate at all, or whose storage policy refuses the directories.
      */
     private fun openLocalMfiAuthenticationClient(): LocalMfiAuthenticationClient? {
         val certificateUri = config.localMfiCertificateUri
@@ -602,10 +603,18 @@ class CarPlayController(
             } ?: throw IOException("Could not open the selected local MFi certificate")
         }
         val source = LocalMfiDocuments.resolve(appContext) ?: return null
-        debugLog("mfi local files source=${source.displayPath}")
-        return source.certificate.inputStream().use { certificateInput ->
-            source.privateKey.inputStream().use { privateKeyInput ->
-                LocalMfiAuthenticationClient.load(certificateInput, privateKeyInput)
+        debugLog("mfi local files source=${source.label} at ${source.displayPath}")
+        val certificateInput = source.openCertificate()
+            ?: throw IOException(
+                "Could not open ${LocalMfiDocuments.CERTIFICATE_FILE_NAME} from ${source.displayPath}",
+            )
+        val privateKeyInput = source.openPrivateKey()
+            ?: throw IOException(
+                "Could not open ${LocalMfiDocuments.PRIVATE_KEY_FILE_NAME} from ${source.displayPath}",
+            )
+        return certificateInput.use { certificate ->
+            privateKeyInput.use { privateKey ->
+                LocalMfiAuthenticationClient.load(certificate, privateKey)
             }
         }
     }

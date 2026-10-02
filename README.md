@@ -88,6 +88,24 @@ the fixed directories `Download/xcertplay` is tried before the app's own one. Th
 `Local files` settings section names the files that will actually be read, and
 `Refresh files` re-checks after a push.
 
+### Certificate built into the app
+
+A panel that can read neither directory — no picker, and a storage policy that
+refuses both `/sdcard` locations — can carry the material inside the APK. The
+build only learns the two paths from its command line or from the gitignored
+`local.properties`, so the repository never references the material:
+
+```bash
+./gradlew :automotive:assembleDebug \
+  -Pxcertplay.mfi.certificate=/abs/path/certificate.p7b \
+  -Pxcertplay.mfi.privateKey=/abs/path/identity.pk8
+```
+
+The two documents are copied to `assets/mfi/mfi.p7b` and `assets/mfi/mfi.pk8`
+and that source is read before the directories. A build without those properties
+is unchanged and carries no certificate. Anyone holding such an APK holds the
+private key, so it is not a build to hand around.
+
 ```bash
 adb push mfi.p7b /sdcard/Download/xcertplay/
 adb push mfi.pk8 /sdcard/Download/xcertplay/

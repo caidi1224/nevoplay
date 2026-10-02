@@ -1,3 +1,6 @@
+// Imported because `java` resolves to the Java extension inside this script, shadowing the package.
+import java.util.Properties
+
 plugins {
     id("com.android.library")
     alias(libs.plugins.kotlin.compose)
@@ -26,6 +29,70 @@ fun Project.xcertplayCommitDate(): String = runCatching {
         commandLine("git", "log", "-1", "--format=%cd", "--date=format:%Y-%m-%d")
     }.standardOutput.asText.get().trim()
 }.getOrNull().orEmpty().ifEmpty { "unknown" }
+
+/**
+ * An optional path handed to the build, from a Gradle property or the gitignored `local.properties`.
+ *
+ * Only the built-in MFi material is looked up this way, and deliberately so: the certificate and its
+ * private key are deployment secrets, so the repository never names a path to them. A build without
+ * these properties is exactly the ordinary build and carries no certificate.
+ */
+fun Project.xcertplayOptionalPath(key: String): String? {
+    (findProperty(key) as? String)?.takeIf { it.isNotBlank() }?.let { return it }
+    val localProperties = rootProject.file("local.properties")
+    if (!localProperties.isFile) return null
+    val properties = Properties()
+    localProperties.inputStream().use(properties::load)
+    return properties.getProperty(key)?.takeIf { it.isNotBlank() }
+}
+
+/**
+ * Copies the deployment's MFi documents into the APK's assets under the names the runtime reads.
+ *
+ * A declared task type rather than a `Copy` because adding a generated asset directory goes through
+ * `addGeneratedSourceDirectory`, which wires the task's `DirectoryProperty` output — and `Copy` only
+ * exposes a `File` destination.
+ */
+abstract class CopyBundledMfiDocuments : DefaultTask() {
+    @get:InputFile
+    abstract val certificate: RegularFileProperty
+
+    @get:InputFile
+    abstract val privateKey: RegularFileProperty
+
+    @get:OutputDirectory
+    abstract val outputDirectory: DirectoryProperty
+
+    @TaskAction
+    fun copyDocuments() {
+        val target = outputDirectory.get().asFile.resolve("mfi")
+        target.mkdirs()
+        certificate.get().asFile.copyTo(target.resolve("mfi.p7b"), overwrite = true)
+        privateKey.get().asFile.copyTo(target.resolve("mfi.pk8"), overwrite = true)
+    }
+}
+
+// Built-in MFi documents, for head units that can read neither the shared Downloads collection nor
+// their own data directory. Give both paths and `assets/mfi/mfi.p7b` + `mfi.pk8` end up in the APK;
+// give neither and this block does nothing at all.
+val bundledMfiCertificate = project.xcertplayOptionalPath("xcertplay.mfi.certificate")
+val bundledMfiPrivateKey = project.xcertplayOptionalPath("xcertplay.mfi.privateKey")
+if (!bundledMfiCertificate.isNullOrBlank() && !bundledMfiPrivateKey.isNullOrBlank()) {
+    val copyBundledMfiDocuments = tasks.register<CopyBundledMfiDocuments>("copyBundledMfiDocuments") {
+        description = "Copies this deployment's MFi certificate and key into the APK's assets."
+        certificate.set(layout.projectDirectory.file(bundledMfiCertificate))
+        privateKey.set(layout.projectDirectory.file(bundledMfiPrivateKey))
+        outputDirectory.set(layout.buildDirectory.dir("generated/bundledMfiAssets"))
+    }
+    androidComponents {
+        onVariants { variant ->
+            variant.sources.assets?.addGeneratedSourceDirectory(
+                copyBundledMfiDocuments,
+                CopyBundledMfiDocuments::outputDirectory,
+            )
+        }
+    }
+}
 
 android {
     namespace = "com.shilapi.xcertplay.host"

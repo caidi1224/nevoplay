@@ -76,6 +76,21 @@ adb push mfi.p7b /sdcard/Download/xcertplay/
 adb push mfi.pk8 /sdcard/Download/xcertplay/
 ```
 
+### 把证书编译进 APK
+
+若车机既没有选择器、两个 `/sdcard` 目录又都读不到，可以把证书直接编进 APK。构建只在
+命令行或 gitignore 的 `local.properties` 里拿到两个路径，仓库本身不引用任何证书材料：
+
+```bash
+./gradlew :automotive:assembleDebug \
+  -Pxcertplay.mfi.certificate=/绝对路径/certificate.p7b \
+  -Pxcertplay.mfi.privateKey=/绝对路径/identity.pk8
+```
+
+两个文件会被拷成 `assets/mfi/mfi.p7b` 与 `assets/mfi/mfi.pk8`，并且优先于两个目录被读取。
+不带这两个参数的构建完全不受影响、不含任何证书。这样的 APK 里带着私钥，拿到它的人就拿到了
+私钥，不要外传。
+
 ## 工程结构
 
 | 路径 | 用途 |
