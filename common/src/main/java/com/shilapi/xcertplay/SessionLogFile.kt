@@ -52,6 +52,13 @@ internal interface SessionLogSink {
      * points at. Returns false when that name does not exist.
      */
     fun renameArchived(from: String, to: String): Boolean
+
+    /**
+     * Creates one more file beside the active one under [name], or null when this destination cannot
+     * do that. Used when a rotation is refused: the finished file cannot be moved aside, and the log
+     * still must not grow without bound.
+     */
+    fun openAdditional(name: String): OutputStream?
 }
 
 internal class FileSessionLogSink(private val file: File) : SessionLogSink {
@@ -74,6 +81,11 @@ internal class FileSessionLogSink(private val file: File) : SessionLogSink {
         if (!source.isFile) return false
         return runCatching { source.renameTo(File(file.parentFile, to)) }.getOrDefault(false)
     }
+
+    override fun openAdditional(name: String): OutputStream? = runCatching {
+        file.parentFile?.mkdirs()
+        File(file.parentFile, name).outputStream()
+    }.getOrNull()
 }
 
 /** Writes to `Download/xcertplay/xcertplay.log` through the media store. */
@@ -149,6 +161,19 @@ internal class MediaStoreSessionLogSink(private val context: Context) : SessionL
             ?: throw IOException("Log destination $displayPath could not be created")
     }
 
+    override fun openAdditional(name: String): OutputStream? = runCatching {
+        val resolver = context.contentResolver
+        val values = ContentValues().apply {
+            put(MediaStore.MediaColumns.DISPLAY_NAME, name)
+            put(MediaStore.MediaColumns.MIME_TYPE, "text/plain")
+            put(MediaStore.MediaColumns.RELATIVE_PATH, relativePath)
+        }
+        val uri = resolver.insert(collection, values)
+            ?: throw IOException("Log destination $name could not be created")
+        resolver.openOutputStream(uri, "w")
+            ?: throw IOException("Log destination $name could not be opened for writing")
+    }.getOrNull()
+
     private val collection: Uri
         get() = MediaStore.Downloads.EXTERNAL_CONTENT_URI
 
@@ -158,7 +183,11 @@ internal class MediaStoreSessionLogSink(private val context: Context) : SessionL
     }
 }
 
-internal class SessionLogFile(private val sink: SessionLogSink) : Closeable {
+internal class SessionLogFile(
+    private val sink: SessionLogSink,
+    /** Per-file cap; a test uses a small one so the rotation path stays cheap to exercise. */
+    private val maxBytes: Long = MAX_BYTES.toLong(),
+) : Closeable {
     /** Destination as shown to the user, e.g. `Download/xcertplay/xcertplay.log`. */
     val destination: String = sink.displayPath
 
@@ -175,7 +204,9 @@ internal class SessionLogFile(private val sink: SessionLogSink) : Closeable {
     private var output: BufferedOutputStream? = null
     private var bytesWritten = 0L
     private var closed = false
+    private var rotationFallbackReported = false
     private val lineFormatter = SimpleDateFormat("HH:mm:ss.SSS", Locale.US)
+    private val rotationStamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US)
 
     /**
      * Begins a session. The file is appended to rather than replaced, so a session that ended in a
@@ -199,14 +230,24 @@ internal class SessionLogFile(private val sink: SessionLogSink) : Closeable {
         }
     }
 
-    /** Shifts the archive chain, oldest first, then moves the just-finished session into it. */
-    private fun rotate() {
+    /**
+     * Shifts the archive chain, oldest first, then moves the just-finished file into it.
+     *
+     * Returns whether the active file was actually moved aside. A destination that refuses the
+     * rename (the media store did, on a head unit whose log grew to 14 MB straight through thirteen
+     * "rotations") leaves the caller appending to the same file, which is what the return value is
+     * for.
+     */
+    private fun rotate(): Boolean {
         for (index in ARCHIVE_NAMES.indices.reversed()) {
             val to = ARCHIVE_NAMES.getOrNull(index + 1) ?: continue
             runCatching { sink.renameArchived(ARCHIVE_NAMES[index], to) }
         }
-        runCatching { sink.renameArchived(LOG_FILE_NAME, ARCHIVE_NAMES.first()) }
+        return runCatching { sink.renameArchived(LOG_FILE_NAME, ARCHIVE_NAMES.first()) }
+            .getOrDefault(false)
     }
+
+    private fun rotatedName(): String = "xcertplay-${rotationStamp.format(Date())}.log"
 
     fun append(line: String) = enqueue { line }
 
@@ -236,14 +277,34 @@ internal class SessionLogFile(private val sink: SessionLogSink) : Closeable {
             while (start < bytes.size && bytes[start].toInt() and 0xc0 == 0x80) start++
             bytes = bytes.copyOfRange(start, bytes.size)
         }
-        if (bytesWritten + bytes.size + 1 > MAX_BYTES) {
+        if (bytesWritten + bytes.size + 1 > maxBytes) {
             output?.close()
             output = null
             // Rotate instead of starting over: the previous generation stays on disk.
-            rotate()
-            output = runCatching { sink.openAppending().buffered() }.getOrNull() ?: return
+            var note = "log rotated: reached ${maxBytes / 1024} KiB"
+            output = if (rotate()) {
+                runCatching { sink.openAppending().buffered() }.getOrNull()
+            } else {
+                // The destination refused to move the finished file aside, so reopening the same name
+                // would keep appending to it and the cap would never hold. Continue in a dated file
+                // instead; if even that is refused, keep writing and say so once, because a silently
+                // unbounded log is worse than a split one.
+                val fallbackName = rotatedName()
+                val fallback = runCatching { sink.openAdditional(fallbackName) }.getOrNull()
+                if (fallback != null) {
+                    note = "log rotation was refused; continuing in $fallbackName"
+                    fallback.buffered()
+                } else {
+                    if (!rotationFallbackReported) {
+                        rotationFallbackReported = true
+                        note = "log rotation and its fallback were both refused; " +
+                            "${sink.displayPath} will keep growing"
+                    }
+                    runCatching { sink.openAppending().buffered() }.getOrNull()
+                }
+            }
             bytesWritten = 0L
-            writeLine("log rotated: reached ${MAX_BYTES / 1024} KiB")
+            writeLine(note)
         }
         val activeOutput = output ?: return
         activeOutput.write(bytes)
