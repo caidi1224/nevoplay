@@ -501,7 +501,9 @@ class CarPlayHostActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         initializeSessionLog()
-        darkMode = isDarkMode(resources.configuration.uiMode)
+        // A head unit that reports UI_MODE_NIGHT_UNDEFINED is not asking for the light palette; start
+        // dark in that case, which is also what the panel looked like before the first explicit hint.
+        darkMode = nightModeOrNull(resources.configuration.uiMode) ?: true
         HostUi.useDarkTheme(darkMode)
         advancedAudioChannelMappingSupported =
             resources.getBoolean(R.bool.config_advanced_audio_channel_mapping)
@@ -692,7 +694,9 @@ class CarPlayHostActivity : ComponentActivity() {
 
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
-        val nextDarkMode = isDarkMode(newConfig.uiMode)
+        // Null means the vehicle did not state a night mode in this update: keep the palette already
+        // on screen instead of reading "undefined" as daylight.
+        val nextDarkMode = nightModeOrNull(newConfig.uiMode) ?: darkMode
         if (nextDarkMode != darkMode) {
             darkMode = nextDarkMode
             syncAirPlayDarkMode()
