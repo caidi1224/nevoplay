@@ -69,6 +69,7 @@ import com.shilapi.xcertplay.host.R
 import com.shilapi.xcertplay.location.AndroidCarPlayLocationProvider
 import com.shilapi.xcertplay.media.AndroidMediaSink
 import com.shilapi.xcertplay.media.CarPlayTouchMapper
+import com.shilapi.xcertplay.media.MainMediaAudioBuffer
 import com.shilapi.xcertplay.media.MicrophoneGain
 import com.shilapi.xcertplay.media.MicrophoneLevelMonitor
 import com.shilapi.xcertplay.mfi.LocalMfiDocuments
@@ -296,6 +297,8 @@ class CarPlayHostActivity : ComponentActivity() {
     private var locationReportingSwitch: HostToggle? = null
     private var microphoneGainSeekBar: HostSlider? = null
     private var microphoneGainValueView: TextView? = null
+    private var mainMediaAudioBufferSlider: HostSlider? = null
+    private var mainMediaAudioBufferValueView: TextView? = null
     private var microphoneTestButton: TextView? = null
     private var microphoneLevelBar: ProgressBar? = null
     private var microphoneLevelValueView: TextView? = null
@@ -373,6 +376,7 @@ class CarPlayHostActivity : ComponentActivity() {
     private var microphoneAvailable = false
     private var microphonePermissionResolved = false
     @Volatile private var microphoneGainPercent = MicrophoneGain.DEFAULT_PERCENT
+    private var mainMediaAudioBufferDurationMs = MainMediaAudioBuffer.DEFAULT_DURATION_MS
     private var wirelessEnabled = false
     private var mfiTarget = MfiTarget.USB_CH341
     private var mfiI2cPath = AirPlayPersistence.DEFAULT_MFI_I2C_PATH
@@ -546,6 +550,7 @@ class CarPlayHostActivity : ComponentActivity() {
             advancedAudioChannelMappingSupported &&
                 AirPlayPersistence.loadAdvancedAudioChannelMapping(this)
         microphoneGainPercent = AirPlayPersistence.loadMicrophoneGainPercent(this)
+        mainMediaAudioBufferDurationMs = AirPlayPersistence.loadMainMediaAudioBufferDurationMs(this)
         debugLogsEnabled = AirPlayPersistence.loadDebugLogsEnabled(this)
         audioPacketCaptureEnabled = AirPlayPersistence.loadAudioPacketCaptureEnabled(this)
         moreGesturesToSettings = AirPlayPersistence.loadMoreGesturesToSettings(this)
@@ -1442,6 +1447,13 @@ class CarPlayHostActivity : ComponentActivity() {
                 ViewGroup.LayoutParams.WRAP_CONTENT,
             ).apply { topMargin = dp(12) },
         )
+        content.addView(
+            buildMainMediaAudioBufferSection(),
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            ).apply { topMargin = dp(20) },
+        )
         if (advancedAudioChannelMappingSupported) {
             content.addView(
                 settingsSwitchRow(
@@ -1957,6 +1969,7 @@ class CarPlayHostActivity : ComponentActivity() {
         AirPlayPersistence.saveAutoStartOnBoot(this, autoStartOnBoot)
         AirPlayPersistence.saveAdvancedAudioChannelMapping(this, advancedAudioChannelMapping)
         AirPlayPersistence.saveMicrophoneGainPercent(this, microphoneGainPercent)
+        AirPlayPersistence.saveMainMediaAudioBufferDurationMs(this, mainMediaAudioBufferDurationMs)
         AirPlayPersistence.saveDisplayScaleTenths(this, displayScaleTenths)
         AirPlayPersistence.saveFps(this, fps)
         AirPlayPersistence.saveWidthPhysicalMm(this, widthPhysicalMm)
@@ -2024,6 +2037,7 @@ class CarPlayHostActivity : ComponentActivity() {
         // menu, so its state is whatever the controller last reported, not "stopped".
         syncMfiSettingsControls()
         syncMicrophoneGainControls()
+        syncMainMediaAudioBufferControls()
         updateManualHotspotFields()
         updateAirPlayIconPreview()
         updateSafeAreaSummary()
@@ -2739,6 +2753,111 @@ class CarPlayHostActivity : ComponentActivity() {
 
     private fun microphoneGainLabel(percent: Int): String =
         String.format(Locale.US, "%.1fx", MicrophoneGain.sanitize(percent) / 100.0)
+
+    /**
+     * Buffered duration of the main media AudioTrack. Larger values ride out bursts at the cost of
+     * latency, which is the trade the head unit's audio path tends to force; only music and media
+     * streams use it (see [MainMediaAudioBuffer]).
+     */
+    private fun buildMainMediaAudioBufferSection(): View {
+        val section = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+        }
+        val header = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        header.addView(
+            menuText(
+                "Media audio buffer (${MainMediaAudioBuffer.MIN_DURATION_MS}–" +
+                    "${MainMediaAudioBuffer.MAX_DURATION_MS} ms)",
+                20f,
+                MENU_LABEL,
+            ),
+            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
+        )
+        val bufferValue = menuText(
+            mainMediaAudioBufferLabel(mainMediaAudioBufferDurationMs),
+            22f,
+            MENU_ACCENT,
+            bold = true,
+        )
+        mainMediaAudioBufferValueView = bufferValue
+        header.addView(
+            bufferValue,
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            ),
+        )
+        section.addView(
+            header,
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            ),
+        )
+        val bufferSlider = HostSlider(this).apply {
+            max = (MainMediaAudioBuffer.MAX_DURATION_MS - MainMediaAudioBuffer.MIN_DURATION_MS) /
+                MainMediaAudioBuffer.STEP_DURATION_MS
+            progress = mainMediaAudioBufferProgress(mainMediaAudioBufferDurationMs)
+            contentDescription = "Media audio buffer duration"
+            setOnChangeListener(
+                object : HostSlider.OnChangeListener {
+                    override fun onProgressChanged(
+                        slider: HostSlider,
+                        progress: Int,
+                        fromUser: Boolean,
+                    ) {
+                        val durationMs = MainMediaAudioBuffer.sanitizeDurationMs(
+                            MainMediaAudioBuffer.MIN_DURATION_MS +
+                                progress * MainMediaAudioBuffer.STEP_DURATION_MS,
+                        )
+                        mainMediaAudioBufferDurationMs = durationMs
+                        mainMediaAudioBufferValueView?.text = mainMediaAudioBufferLabel(durationMs)
+                    }
+
+                    override fun onStartTrackingTouch(slider: HostSlider) = Unit
+                    override fun onStopTrackingTouch(slider: HostSlider) = Unit
+                },
+            )
+        }
+        mainMediaAudioBufferSlider = bufferSlider
+        section.addView(
+            bufferSlider,
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            ).apply { topMargin = dp(4) },
+        )
+        section.addView(
+            menuText(
+                "Music and media only. Smaller buffers cut audio latency, larger ones survive " +
+                    "bursts; takes effect on the next connection.",
+                14f,
+                MENU_SECONDARY,
+            ),
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            ).apply { topMargin = dp(6) },
+        )
+        return section
+    }
+
+    private fun mainMediaAudioBufferLabel(durationMs: Int): String =
+        "${MainMediaAudioBuffer.sanitizeDurationMs(durationMs)} ms"
+
+    private fun mainMediaAudioBufferProgress(durationMs: Int): Int =
+        (MainMediaAudioBuffer.sanitizeDurationMs(durationMs) - MainMediaAudioBuffer.MIN_DURATION_MS) /
+            MainMediaAudioBuffer.STEP_DURATION_MS
+
+    private fun syncMainMediaAudioBufferControls() {
+        mainMediaAudioBufferValueView?.text =
+            mainMediaAudioBufferLabel(mainMediaAudioBufferDurationMs)
+        mainMediaAudioBufferSlider?.progress =
+            mainMediaAudioBufferProgress(mainMediaAudioBufferDurationMs)
+    }
 
     private fun syncMicrophoneGainControls() {
         microphoneGainValueView?.text = microphoneGainLabel(microphoneGainPercent)
@@ -3927,6 +4046,7 @@ class CarPlayHostActivity : ComponentActivity() {
         videoHeight = videoHeight,
         preferSoftwareHevcDecoder = hevcSoftwareDecoderEnabled,
         advancedAudioChannelMapping = advancedAudioChannelMapping,
+        mainMediaAudioBufferDurationMs = mainMediaAudioBufferDurationMs,
         microphoneGainPercent = microphoneGainPercent,
         onScreenStreamActiveChanged = { type, active ->
             onScreenStreamStateChanged(controllerGeneration, type, active)
@@ -4320,6 +4440,7 @@ class CarPlayHostActivity : ComponentActivity() {
         gestureOverlay?.visibility = View.GONE
         settingsMenu?.visibility = View.VISIBLE
         syncMicrophoneGainControls()
+        syncMainMediaAudioBufferControls()
         // Re-probe the local MFi directories on every open: the files are pushed over adb while the
         // app is running, and the section is built once.
         refreshLocalMfiSources()
