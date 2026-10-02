@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
@@ -30,6 +31,8 @@ internal class CarPlayArtwork(
 
 /** Process-local seam between the iAP2 owner and the lifecycle-owned Media3 service. */
 internal object CarPlayMediaSessionBridge {
+    private const val TAG = "xcertplay-usb"
+
     private var owner: Any? = null
     private var commandSink: ((Iap2MediaRemoteCommand) -> Boolean)? = null
     private var snapshot = CarPlayMediaSnapshot()
@@ -49,9 +52,29 @@ internal object CarPlayMediaSessionBridge {
             observer to snapshot
         }
         update.first?.invoke(update.second)
-        context.applicationContext.startService(
-            Intent(context.applicationContext, CarPlayMediaSessionService::class.java),
-        )
+        startServiceBestEffort(context.applicationContext)
+    }
+
+    /**
+     * Starts the Media3 service, or gives up on the media session.
+     *
+     * `startService` throws when the app is in the background (the Android 8+ background service
+     * limits), and this call is reached from the reconnect path - a rebuild scheduled while the
+     * head unit had the app behind its own UI, or while the vehicle never brought it forward at
+     * all. Letting that exception escape the UI thread killed the process and took a working
+     * CarPlay session with it; two device logs end exactly here, both with
+     * `IllegalStateException: Not allowed to start service ... app is in background`.
+     *
+     * Nothing this call does is worth a process death: the session only carries the Now Playing
+     * metadata and the remote commands, so a refused start degrades the media integration instead
+     * of the session. The next rebuild asks again, and so does the next foreground attach.
+     */
+    private fun startServiceBestEffort(context: Context) {
+        try {
+            context.startService(Intent(context, CarPlayMediaSessionService::class.java))
+        } catch (refused: RuntimeException) {
+            Log.w(TAG, "media session service start refused; continuing without it", refused)
+        }
     }
 
     fun detach(context: Context, owner: Any) {
