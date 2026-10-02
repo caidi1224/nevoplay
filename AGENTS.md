@@ -186,12 +186,19 @@ verified change and for the tests CI owns - not for finding out whether the code
 compiles.
 
 ```bash
-source ~/.dsh/xcertplay-signing.env   # fork key, so the APK is installable
-./gradlew :mobile:assembleDebug       # seconds -> mobile/build/outputs/apk/debug/
+source ~/.dsh/xcertplay-signing.env        # fork key, so the APK is installable
+./gradlew clean :mobile:assembleDebug      # clean first, then build, in one invocation
 ```
 
-If a build fails on a duplicated class (`FooKt 2.class`), the incremental
-outputs are stale - usually after restoring files with `git checkout`:
+**Clean in the same invocation as every verification or APK build.** Incremental
+outputs go stale in this project - a build that fails half way leaves numbered
+copies of classes behind - and the damage shows up in a later, unrelated build as
+a duplicated class (`FooKt 2.class`, `D8: Type ... is defined multiple times`,
+`... already exists, it cannot be overwritten by SerializableChange`). `clean`
+costs seconds and removes that whole class of failure. The root
+`purgeStaleClassCopies` task also deletes those numbered copies before every
+module's `preBuild`, but treat it as the second line of defence, not the first.
+When something else looks wrong with the outputs, the explicit fallback is:
 
 ```bash
 ./gradlew :common:clean :mobile:clean
@@ -293,7 +300,7 @@ and the bar-state logging in this fork came to exist.
 - 提交信息沿用现有风格：`feat:`、`fix(scope):`、`opti:`、`chore:`、`update README.md`，版本号提交直接写 `1.3.0`。
 - **每交付一个改动，版本号末尾的小版本号 +1**（`1.3.1` → `1.3.1.1` → `1.3.1.2`…），不重复使用已经构建过的值；合并上游后以新的三段版本为基准重新从 `.1` 开始。两个数字集中在 `gradle/libs.versions.toml`（`xcertplayVersionName` / `xcertplayVersionCode`），mobile 与 automotive 都从那里读取，不会各写一份。
 - 每个构建还带 `BuildConfig.BUILD_ID`（提交号 `[+run<CI运行号>]`）：写在会话日志**首行**，也显示在 设置 → 诊断 里——这是判断“车上装的是哪一版、日志出自哪一版”的依据。
-- **推送前必须先本地编译验证**（JDK 25 与 Android SDK 已装好，见上文）：改代码 → `./gradlew :mobile:assembleDebug` 出包秒级完成 → 再推送。CI 只负责单元测试与留档产物，不用来“发现编译不过”。若报重复类（`FooKt 2.class`），是增量产物陈旧（常见于用 `git checkout` 恢复过文件），执行 `./gradlew :common:clean :mobile:clean` 即可。
+- **推送前必须先本地编译验证**（JDK 25 与 Android SDK 已装好，见上文），并且**每次验证/出包都要在同一条命令里先 clean**：`./gradlew clean :mobile:assembleDebug`。这个项目的增量产物会陈旧（构建中途失败会留下 `名字 2.class` 这类编号副本），代价是下一次不相关的构建报重复类（`FooKt 2.class`、`D8: Type ... is defined multiple times`、`... already exists, it cannot be overwritten by SerializableChange`）。clean 只花几秒，能从根上避开这一类失败；根项目还注册了 `purgeStaleClassCopies`，在每个模块 `preBuild` 前删掉这些编号副本，但那是第二道防线，不是第一道。CI 只负责单元测试与留档产物，不用来“发现编译不过”。
 - **撤销已推送的改动**：单个提交用 `git revert <sha>`；但**连续 revert 多个提交通常会冲突**，因为每个提交都改了 `libs.versions.toml`。要退回旧状态就用 `git checkout <旧提交> -- <文件>` 恢复文件后向前提交，并且**仍要使用一个全新的版本号**（已构建过的值不能复用：退回 1.3.1.20 的界面是以 1.3.1.35 发布的）。动手前先 `git tag -f before-<改动> HEAD` 留个后路。
 - **签名密钥**：本机 `~/.dsh/xcertplay-fork.jks`（600）+ `~/.dsh/xcertplay-signing.env`；GitHub secrets 里的副本**读不回来**，密钥丢了只能轮换，代价是每台车卸载重装一次。当前证书指纹 `744abb75…85405e`。
 - **CI 工作流**：`.github/workflows/fork-debug-apks.yml`（产物 `fork-debug-apks`），`workflow_dispatch` 已存在，**不要再加一次** —— 重复键会让 GitHub 直接拒绝整个工作流，且那次运行没有日志可看。
