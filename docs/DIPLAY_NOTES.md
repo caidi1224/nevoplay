@@ -34,6 +34,7 @@ reports `isFork: false` because its history was re-rooted, not because the code 
 | Screen-stream state | Replaying the active stream set when the state listener is re-installed | If a screen stream is already active and the listener is replaced, the host never learns it — the picture stays frozen with no indication. This is the most plausible code-level explanation for the freeze after saving settings. |
 | Audio | `MAX_QUEUED_PACKETS` 64 → 192, polling the decoder every 10 ms even when no packet arrives, and rebuilding the music buffer after starvation | 64 AAC packets is ≈1.49 s, and our start threshold was ≈23 ms: a normal Wi-Fi gap underruns the track and the burst that follows is dropped. Their own changelog still lists occasional audio cutouts, so this is mitigation, not a fix. |
 | Lockdown recovery | Recognising `InvalidHostID` as a rejected pair record, and only clearing a *saved* record (DiPlay `842b647`) | iOS answers `InvalidHostID` when it no longer knows the host identity in the record; the old code rethrew that as a hard failure. Clearing a record this run had just created could also throw away a good pairing for an unrelated error. |
+| Audio receive buffer | A 512 KiB `SO_RCVBUF` on the RTP socket, with the granted size logged (part of DiPlay `e0aa67a`) | The platform default holds a handful of packets, so a Wi-Fi scheduling hiccup drops frames no decoder-side change can bring back. The log line says whether the request was actually honoured. |
 
 ## Deliberately not borrowed
 

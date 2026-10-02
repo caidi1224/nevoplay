@@ -53,6 +53,20 @@ class AudioStream(
 
     fun listen(listener: Listener): Pair<Int, Int> {
         val data = bindAnyPort()
+        // Keep a short Wi-Fi burst in the kernel while the receive thread is decrypting or waiting
+        // for a scheduling slot: the default buffer is a few packets, and whatever overflows is
+        // simply lost, which the renderer then reports as an audible gap. The platform may cap the
+        // request, so log what it actually granted.
+        val originalReceiveBuffer = runCatching { data.receiveBufferSize }.getOrDefault(0)
+        if (originalReceiveBuffer < AUDIO_RECEIVE_BUFFER_BYTES) {
+            runCatching { data.receiveBufferSize = AUDIO_RECEIVE_BUFFER_BYTES }
+        }
+        android.util.Log.i(
+            TAG,
+            "audio stream type=$streamType receiveBuffer " +
+                "original=$originalReceiveBuffer requested=$AUDIO_RECEIVE_BUFFER_BYTES " +
+                "actual=${runCatching { data.receiveBufferSize }.getOrDefault(0)}",
+        )
         val control = bindAnyPort()
         dataSocket = data
         controlSocket = control
@@ -185,6 +199,13 @@ class AudioStream(
         const val TAIL_LEN = TAG_LEN + NONCE_LEN
         const val FIRST_PACKET_LOG_COUNT = 3
         const val PACKET_LOG_INTERVAL = 100
+
+        /**
+         * Requested kernel receive buffer for the RTP data socket. A 48 kHz stereo AAC stream sends
+         * roughly 40 KB/s, so this holds on the order of ten seconds of frames - far more than a
+         * Wi-Fi scheduling hiccup, while the renderer still bounds playback latency.
+         */
+        const val AUDIO_RECEIVE_BUFFER_BYTES = 512 * 1024
     }
 }
 
