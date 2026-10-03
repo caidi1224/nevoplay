@@ -704,7 +704,18 @@ class CarPlayHostActivity : ComponentActivity() {
         super.onConfigurationChanged(newConfig)
         // Null means the vehicle did not state a night mode in this update: keep the palette already
         // on screen instead of reading "undefined" as daylight.
-        val nextDarkMode = nightModeOrNull(newConfig.uiMode) ?: darkMode
+        val statedNightMode = nightModeOrNull(newConfig.uiMode)
+        val nextDarkMode = statedNightMode ?: darkMode
+        // Recorded on every dispatch, including the ones that change nothing. Whether the vehicle
+        // reports its day/night switch at all is the one fact that separates "the phone ignored our
+        // setNightMode" from "we never knew about it" - and a config update that arrives carrying no
+        // stated mode is exactly the second case. The raw uiMode goes in too, because which bits this
+        // vehicle sets is not something to keep guessing at.
+        appendLog(
+            "uiMode uiMode=${newConfig.uiMode} stated=${statedNightMode ?: "undefined"} " +
+                "paletteWas=${if (darkMode) "dark" else "light"} " +
+                "applying=${if (nextDarkMode) "dark" else "light"}",
+        )
         if (nextDarkMode != darkMode) {
             darkMode = nextDarkMode
             syncAirPlayDarkMode()
@@ -4383,6 +4394,13 @@ class CarPlayHostActivity : ComponentActivity() {
                     TAG,
                     "AirPlay dark mode=${if (night) "dark" else "light"} eventChannelReady=$sent",
                 )
+                // Also into the session log: this line is the proof of what we asked the phone for,
+                // and the logcat tap that carries Log.i provably loses lines.
+                runOnUiThread {
+                    appendLog(
+                        "AirPlay night mode sent night=$night eventChannelReady=$sent",
+                    )
+                }
             } catch (error: Throwable) {
                 Log.w(TAG, "Could not send AirPlay dark mode update", error)
             }
