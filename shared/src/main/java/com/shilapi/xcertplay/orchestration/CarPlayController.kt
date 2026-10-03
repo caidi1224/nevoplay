@@ -1676,6 +1676,7 @@ class CarPlayController(
                     context = appContext,
                     networkName = credentials.ssid,
                     passphrase = credentials.passphrase,
+                    log = { message -> debugLog(message) },
                 )
             }
             WirelessHotspotMode.LOCAL_ONLY_HOTSPOT -> LocalOnlyHotspotManager(appContext)

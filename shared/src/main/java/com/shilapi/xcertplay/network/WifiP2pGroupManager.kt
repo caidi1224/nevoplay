@@ -53,6 +53,14 @@ class WifiP2pGroupManager(
     context: Context,
     private val networkName: String,
     private val passphrase: String,
+    /**
+     * Where the channel lifecycle goes. It was silent, which left the leak this class used to have
+     * - a channel per bring-up attempt, never closed - invisible in every log: the fix for it shipped
+     * with nothing that could show whether the channels are now actually handed back, or whether
+     * close() fails. Log.i alone would not do either, because the logcat tap that carries it loses
+     * lines.
+     */
+    private val log: (String) -> Unit = {},
 ) : WirelessHotspotManager {
     private val appContext = context.applicationContext
     private val p2pManager = appContext.getSystemService(WifiP2pManager::class.java)
@@ -60,6 +68,7 @@ class WifiP2pGroupManager(
     private val stateLock = Object()
 
     private var channel: WifiP2pManager.Channel? = null
+    private val openChannels = java.util.concurrent.atomic.AtomicInteger(0)
     private var callbackThread: HandlerThread? = null
     private var created = false
     private var closed = false
@@ -100,6 +109,10 @@ class WifiP2pGroupManager(
                 channel = p2pChannel
                 callbackThread = thread
             }
+            log(
+                "wifi p2p channel opened id=${System.identityHashCode(p2pChannel)} " +
+                    "outstanding=${openChannels.incrementAndGet()}",
+            )
 
             val config = WifiP2pConfig.Builder()
                 .setNetworkName(credentials.ssid)
@@ -569,7 +582,19 @@ class WifiP2pGroupManager(
      */
     private fun releaseChannel(channel: WifiP2pManager.Channel?) {
         if (channel == null) return
-        runCatching { channel.close() }
+        val id = System.identityHashCode(channel)
+        val outcome = runCatching { channel.close() }
+        val outstanding = openChannels.decrementAndGet()
+        val error = outcome.exceptionOrNull()
+        if (error == null) {
+            log("wifi p2p channel released id=$id outstanding=$outstanding")
+        } else {
+            Log.w(TAG, "Wi-Fi P2P channel close failed", error)
+            log(
+                "wifi p2p channel release FAILED id=$id outstanding=$outstanding " +
+                    "reason=${error.javaClass.simpleName}: ${error.message ?: "no message"}",
+            )
+        }
     }
 
     private fun removeGroupBlocking(channel: WifiP2pManager.Channel) {
