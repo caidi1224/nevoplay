@@ -349,6 +349,8 @@ class CarPlayHostActivity : ComponentActivity() {
     private var displayScaleTenths = CarPlayDisplayScale.DEFAULT_TENTHS
     private var hevcEnabled = true
     private var hevcSoftwareDecoderEnabled = false
+    /** Follow the palette for the bars instead of forcing them dark. See applySystemBarPalette(). */
+    private var systemBarsFollowPalette = false
     private var advancedAudioChannelMappingSupported = false
     private var advancedAudioChannelMapping = false
     @Volatile private var debugLogsEnabled = false
@@ -560,6 +562,7 @@ class CarPlayHostActivity : ComponentActivity() {
         hevcSoftwareDecoderEnabled =
             Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
                 AirPlayPersistence.loadHevcSoftwareDecoderEnabled(this)
+        systemBarsFollowPalette = AirPlayPersistence.loadSystemBarsFollowPalette(this)
         advancedAudioChannelMapping =
             advancedAudioChannelMappingSupported &&
                 AirPlayPersistence.loadAdvancedAudioChannelMapping(this)
@@ -981,17 +984,32 @@ class CarPlayHostActivity : ComponentActivity() {
      */
     @Suppress("DEPRECATION")
     private fun applySystemBarPalette() {
-        window.statusBarColor = Color.BLACK
-        window.navigationBarColor = Color.BLACK
-        window.decorView.setBackgroundColor(Color.BLACK)
+        // Two configurations, and the difference is not cosmetic.
+        //
+        // Forcing the bars dark (the default) keeps the icons readable whatever the vehicle paints
+        // behind them, at the cost of a bar that does not match the rest of the head unit. Following
+        // the palette is what every other app on this unit does - a light bar with dark icons - and
+        // it is what the driver asked for, but whether the dark-icon request is rendered cannot be
+        // detected from inside the app: the request demonstrably arrives (the vehicle's own insets
+        // controller logs it as setSystemBarsAppearance: appearance=0, mask=24, which is this app's
+        // call down to the bit), and whether the bar redraws after it is SystemUI's business. So it
+        // is a switch, default off, and the driver is the one who looks.
+        val darkIcons = systemBarsFollowPalette && !darkMode
+        val background = if (darkIcons) Color.WHITE else Color.BLACK
+        window.statusBarColor = background
+        window.navigationBarColor = background
+        window.decorView.setBackgroundColor(background)
+        val lightIcons = WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or
+            WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            val lightIcons = WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or
-                WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
-            window.insetsController?.setSystemBarsAppearance(0, lightIcons)
+            window.insetsController?.setSystemBarsAppearance(
+                if (darkIcons) lightIcons else 0,
+                lightIcons,
+            )
         }
         val controller = WindowInsetsControllerCompat(window, window.decorView)
-        controller.isAppearanceLightStatusBars = false
-        controller.isAppearanceLightNavigationBars = false
+        controller.isAppearanceLightStatusBars = darkIcons
+        controller.isAppearanceLightNavigationBars = darkIcons
         logSystemBarOwnership()
     }
 
@@ -1025,6 +1043,7 @@ class CarPlayHostActivity : ComponentActivity() {
                 (insets?.isVisible(WindowInsetsCompat.Type.navigationBars()) ?: false) +
                 " navigationInsetPx=" +
                 (insets?.getInsets(WindowInsetsCompat.Type.navigationBars())?.bottom ?: -1) +
+                " followPalette=$systemBarsFollowPalette palette=${if (darkMode) "dark" else "light"}" +
                 " appliedStatusBarColor=#" + Integer.toHexString(statusBarColor) +
                 " lightStatusIcons=" +
                 WindowInsetsControllerCompat(window, window.decorView).isAppearanceLightStatusBars +
@@ -1818,6 +1837,55 @@ class CarPlayHostActivity : ComponentActivity() {
             )
         }
 
+        val followPaletteRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        followPaletteRow.addView(
+            LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                addView(menuText("Status bar follows the theme", 20f, MENU_LABEL))
+                addView(
+                    menuText(
+                        "Off: always dark, so the icons stay readable. On: light bar with " +
+                            "dark icons in the light theme, like the rest of the head unit.",
+                        16f,
+                        MENU_FAINT,
+                    ),
+                )
+            },
+            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
+        )
+        val followPaletteSwitch = HostToggle(this).apply {
+            isChecked = systemBarsFollowPalette
+            contentDescription = "Status bar follows the theme"
+            setOnCheckedChangeListener { _, checked ->
+                if (systemBarsFollowPalette == checked) return@setOnCheckedChangeListener
+                systemBarsFollowPalette = checked
+                AirPlayPersistence.saveSystemBarsFollowPalette(this@CarPlayHostActivity, checked)
+                appendLog(
+                    "system bars followPalette=$checked; look at the bar now, it changes at once",
+                )
+                // Applied immediately, unlike the resolution switches: the whole point is that the
+                // driver can see the difference without leaving the screen.
+                applySystemBarPalette()
+            }
+        }
+        followPaletteRow.addView(
+            followPaletteSwitch,
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            ),
+        )
+        content.addView(
+            followPaletteRow,
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            ).apply { topMargin = dp(16) },
+        )
+
         content.addView(
             buildSafeAreaSection(),
             LinearLayout.LayoutParams(
@@ -2074,6 +2142,7 @@ class CarPlayHostActivity : ComponentActivity() {
         AirPlayPersistence.savePhysicalSizeBasis(this, physicalSizeBasis)
         AirPlayPersistence.saveHevcEnabled(this, hevcEnabled)
         AirPlayPersistence.saveHevcSoftwareDecoderEnabled(this, hevcSoftwareDecoderEnabled)
+        AirPlayPersistence.saveSystemBarsFollowPalette(this, systemBarsFollowPalette)
         AirPlayPersistence.saveManufacturer(this, manufacturer)
         AirPlayPersistence.saveModel(this, model)
         AirPlayPersistence.saveOemLabel(this, oemLabel)
