@@ -37,7 +37,6 @@ object AirPlayPersistence {
     private const val KEY_DISPLAY_SCALE_TENTHS = "display_scale_tenths"
     private const val KEY_HEVC_ENABLED = "hevc_enabled"
     private const val KEY_HEVC_SOFTWARE_DECODER = "hevc_software_decoder"
-    private const val KEY_SYSTEM_BARS_FOLLOW_PALETTE = "system_bars_follow_palette"
     private const val KEY_ADVANCED_AUDIO_CHANNEL_MAPPING = "advanced_audio_channel_mapping"
     private const val KEY_MAIN_MEDIA_AUDIO_BUFFER_DURATION_MS = "main_media_audio_buffer_duration_ms"
     private const val KEY_MICROPHONE_GAIN_PERCENT = "microphone_gain_percent"
@@ -108,22 +107,6 @@ object AirPlayPersistence {
     fun loadHevcSoftwareDecoderEnabled(context: Context): Boolean =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .getBoolean(KEY_HEVC_SOFTWARE_DECODER, false)
-
-    /**
-     * Whether the system bars follow the palette instead of being forced dark.
-     *
-     * Default false: forcing them dark keeps the icons readable no matter what the vehicle paints
-     * behind them, and the app cannot detect whether a dark-icon request is actually rendered.
-     */
-    fun loadSystemBarsFollowPalette(context: Context): Boolean =
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .getBoolean(KEY_SYSTEM_BARS_FOLLOW_PALETTE, false)
-
-    fun saveSystemBarsFollowPalette(context: Context, enabled: Boolean) {
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-            .putBoolean(KEY_SYSTEM_BARS_FOLLOW_PALETTE, enabled)
-            .apply()
-    }
 
     fun saveHevcSoftwareDecoderEnabled(context: Context, enabled: Boolean) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
