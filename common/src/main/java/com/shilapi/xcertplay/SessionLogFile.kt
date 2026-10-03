@@ -205,6 +205,8 @@ internal class SessionLogFile(
     private var bytesWritten = 0L
     private var closed = false
     private var rotationFallbackReported = false
+    /** Kept so every file a rotation starts can name the build, not only the first one. */
+    private var sessionHeader: String? = null
     private val lineFormatter = SimpleDateFormat("HH:mm:ss.SSS", Locale.US)
     private val rotationStamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US)
 
@@ -226,6 +228,7 @@ internal class SessionLogFile(
                 .onFailure { append("log destination unavailable: ${it.message}") }
                 .getOrNull()
             bytesWritten = 0L
+            sessionHeader = header
             writeLine(header)
         }
     }
@@ -282,7 +285,9 @@ internal class SessionLogFile(
             output = null
             // Rotate instead of starting over: the previous generation stays on disk.
             var note = "log rotated: reached ${maxBytes / 1024} KiB"
+            var startedNewFile = false
             output = if (rotate()) {
+                startedNewFile = true
                 runCatching { sink.openAppending().buffered() }.getOrNull()
             } else {
                 // The destination refused to move the finished file aside, so reopening the same name
@@ -292,6 +297,7 @@ internal class SessionLogFile(
                 val fallbackName = rotatedName()
                 val fallback = runCatching { sink.openAdditional(fallbackName) }.getOrNull()
                 if (fallback != null) {
+                    startedNewFile = true
                     note = "log rotation was refused; continuing in $fallbackName"
                     fallback.buffered()
                 } else {
@@ -304,6 +310,11 @@ internal class SessionLogFile(
                 }
             }
             bytesWritten = 0L
+            // The session header goes into every file the rotation starts, before the note that says
+            // why. It is the only thing in the log that names the build, and a rotated generation
+            // without it cannot be matched to the APK that produced it - which is exactly what the
+            // header exists for. It is still the same session's header, so the build id stays right.
+            if (startedNewFile) sessionHeader?.let { writeLine(it) }
             writeLine(note)
         }
         val activeOutput = output ?: return
