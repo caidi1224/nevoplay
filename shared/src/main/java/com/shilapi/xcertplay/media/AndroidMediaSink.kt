@@ -872,7 +872,7 @@ private class AudioRenderer(
             maxOf(minBuffer * 4, MIN_TRACK_BUFFER_BYTES)
         }
         startThresholdBytes = if (format.audioType == "telephony" || format.audioType == "speechrecognition") {
-            maxOf(minBuffer, MIN_START_BUFFER_BYTES)
+            CallAudioBuffer.startThresholdBytes(format.sampleRate, trackChannelCount, minBuffer)
         } else {
             maxOf(minBuffer, MIN_START_BUFFER_BYTES)
         }
