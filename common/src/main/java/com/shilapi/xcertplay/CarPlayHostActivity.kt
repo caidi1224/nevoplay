@@ -963,6 +963,46 @@ class CarPlayHostActivity : ComponentActivity() {
         val controller = WindowInsetsControllerCompat(window, window.decorView)
         controller.isAppearanceLightStatusBars = false
         controller.isAppearanceLightNavigationBars = false
+        logSystemBarOwnership()
+    }
+
+    /**
+     * One line that says who owns the status bar the driver can actually see.
+     *
+     * Two attempts at making that bar readable in the light palette failed, and both times the log
+     * could not say why: nothing recorded whether the bar belongs to this window at all. If the bars
+     * are not visible to this window while the driver still sees one, the vehicle draws it and no
+     * colour or icon appearance set here can reach it. The panel being taller than the area Android
+     * reports says the same thing from the other side - that strip is outside this app's display.
+     */
+    @Suppress("DEPRECATION")
+    private fun logSystemBarOwnership() {
+        val insets = ViewCompat.getRootWindowInsets(window.decorView)
+        val statusBarColor = window.statusBarColor
+        val activeDisplay = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            display
+        } else {
+            windowManager.defaultDisplay
+        }
+        val mode = activeDisplay?.mode
+        val displayArea = android.graphics.Point()
+        activeDisplay?.getRealSize(displayArea)
+        appendLog(
+            "system bars statusVisible=" +
+                (insets?.isVisible(WindowInsetsCompat.Type.statusBars()) ?: false) +
+                " statusInsetPx=" +
+                (insets?.getInsets(WindowInsetsCompat.Type.statusBars())?.top ?: -1) +
+                " navigationVisible=" +
+                (insets?.isVisible(WindowInsetsCompat.Type.navigationBars()) ?: false) +
+                " navigationInsetPx=" +
+                (insets?.getInsets(WindowInsetsCompat.Type.navigationBars())?.bottom ?: -1) +
+                " appliedStatusBarColor=#" + Integer.toHexString(statusBarColor) +
+                " lightStatusIcons=" +
+                WindowInsetsControllerCompat(window, window.decorView).isAppearanceLightStatusBars +
+                " windowViewport=${window.decorView.width}x${window.decorView.height}" +
+                " displayArea=${displayArea.x}x${displayArea.y}" +
+                " panel=${mode?.physicalWidth ?: -1}x${mode?.physicalHeight ?: -1}",
+        )
     }
 
     /**
