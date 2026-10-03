@@ -41,10 +41,17 @@ class AndroidMediaSink(
     mediaMetricsMonitor: MediaMetricsMonitor? = null,
     onScreenStreamActiveChanged: ((Int, Boolean) -> Unit)? = null,
     onVideoFrameRendered: (() -> Unit)? = null,
+    /**
+     * The microphone's lifecycle as a line the session log can hold. Log.i reaches the session log
+     * only through a logcat tap that loses lines, and the microphone is the one part of a call that
+     * nothing else in the log can stand in for.
+     */
+    onMicrophoneEvent: ((String) -> Unit)? = null,
 ) : MediaSink {
     private val defaultSurface = surface
     @Volatile private var screenStreamActiveChanged = onScreenStreamActiveChanged
     @Volatile private var videoFrameRendered = onVideoFrameRendered
+    @Volatile private var microphoneEvent = onMicrophoneEvent
     @Volatile private var firstFrameRendered = false
     private val surfaces = ConcurrentHashMap<Int, Surface>()
     private val videoDecoders = ConcurrentHashMap<Int, VideoDecoder>()
@@ -138,7 +145,9 @@ class AndroidMediaSink(
 
     override fun onMicrophoneStarted(id: AudioStreamId, config: MicrophoneConfig) {
         val uplink = microphoneUplinks.computeIfAbsent(id) {
-            MicrophoneUplink(context, config, microphoneGainPercent)
+            MicrophoneUplink(context, config, microphoneGainPercent) { message ->
+                microphoneEvent?.invoke(message)
+            }
         }
         if (!uplink.start()) microphoneUplinks.remove(id, uplink)
     }

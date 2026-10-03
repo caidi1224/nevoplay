@@ -4163,6 +4163,13 @@ class CarPlayHostActivity : ComponentActivity() {
             onScreenStreamStateChanged(controllerGeneration, type, active)
         },
         onVideoFrameRendered = { onVideoFrameRendered(controllerGeneration) },
+        onMicrophoneEvent = { message ->
+            runOnUiThread {
+                if (!shuttingDown.get() && controllerGeneration == restartGeneration) {
+                    appendLog(message)
+                }
+            }
+        },
     )
 
     private fun createMediaEngine(sink: AndroidMediaSink): CarPlayMediaEngine =

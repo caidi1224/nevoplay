@@ -128,6 +128,18 @@ internal class AudioModeLeaseManager(
 internal object MicrophoneAudioMode {
     private const val TAG = "xcertplay-usb"
 
+    /**
+     * What the last acquisition found and did, for the caller to report through the session log.
+     *
+     * The same fact is in a Log.i line, and a device log shows that the logcat tap carrying Log.i
+     * loses lines: a call's `audio format type=100` and `audio track prepared type=100` were both
+     * missing from a file whose own track then played for 26 seconds. Anything that has to survive
+     * belongs in the session log.
+     */
+    @Volatile
+    var lastAcquisition: String = "unavailable"
+        private set
+
     /** Communication modes the uplink is happy to capture under. */
     private val COMMUNICATION_MODES = setOf(
         AudioManager.MODE_IN_COMMUNICATION,
@@ -153,6 +165,8 @@ internal object MicrophoneAudioMode {
                 // below on success and the recorder error on failure, one call decides whether
                 // MODE_IN_CALL is what AudioFlinger objects to.
                 onAcquired = { found, attemptedWrite, effective ->
+                    lastAcquisition =
+                        "found=$found attemptedWrite=$attemptedWrite effective=$effective"
                     Log.i(
                         TAG,
                         "microphone audio mode found=$found attemptedWrite=$attemptedWrite " +

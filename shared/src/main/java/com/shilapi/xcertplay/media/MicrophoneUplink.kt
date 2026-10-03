@@ -25,6 +25,12 @@ internal class MicrophoneUplink(
     private val context: Context,
     private val config: MicrophoneConfig,
     microphoneGainPercent: Int,
+    /**
+     * Where the uplink's own lifecycle goes. Log.i alone was not enough: the logcat tap that carries
+     * it loses lines, and the microphone is the part of a call that cannot be reconstructed from
+     * anything else in the log.
+     */
+    private val report: (String) -> Unit = {},
 ) : Closeable {
     private val microphoneGainPercent = MicrophoneGain.sanitize(microphoneGainPercent)
     private val running = AtomicBoolean(false)
@@ -41,7 +47,12 @@ internal class MicrophoneUplink(
             startCapture()
             true
         } catch (error: Exception) {
+            val reason = "${error.javaClass.simpleName}: ${error.message ?: "no message"}"
             Log.e(TAG, "microphone start failed", error)
+            report(
+                "microphone uplink FAILED type=${config.audioType} codec=${config.codec} " +
+                    "mode=${MicrophoneAudioMode.lastAcquisition} reason=$reason",
+            )
             release()
             false
         }
@@ -80,6 +91,12 @@ internal class MicrophoneUplink(
                 "captureRate=$MICROPHONE_CAPTURE_RATE_HZ outputRate=${config.sampleRate} " +
                 "channels=${config.channels} gain=${microphoneGainPercent}% " +
                 "frameMs=${config.frameMillis} port=${config.port}",
+        )
+        report(
+            "microphone uplink started type=${config.audioType} codec=${config.codec} " +
+                "mode=${MicrophoneAudioMode.lastAcquisition} " +
+                "outputRate=${config.sampleRate} gain=${microphoneGainPercent}% " +
+                "port=${config.port}",
         )
     }
 
