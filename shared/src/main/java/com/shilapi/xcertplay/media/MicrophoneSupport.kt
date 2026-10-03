@@ -98,7 +98,14 @@ internal class AudioModeLeaseManager(
     fun acquire(): Closeable {
         if (users == 0) {
             previousMode = readMode()
-            changedMode = previousMode !in acceptableModes
+            // Write it even when the mode already looks acceptable. MODE_IN_CALL is the telephony
+            // stack's own mode and is not the same HAL route as MODE_IN_COMMUNICATION: the recorder
+            // has to be created on the communication path, and a peer implementation selects it
+            // unconditionally right before creating the recorder. Skipping that write is one way to
+            // get AudioFlinger's "createRecord returned error -1" during a call, which is this fork's
+            // own symptom. Whether the write sticks is checked next, and a refusal is reported rather
+            // than fatal - acceptableModes now only decides whether it is worth warning about.
+            changedMode = previousMode != communicationMode
             if (changedMode) writeMode(communicationMode)
             val effectiveMode = readMode()
             onAcquired(previousMode, changedMode, effectiveMode)

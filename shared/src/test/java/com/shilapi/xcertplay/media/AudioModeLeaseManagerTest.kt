@@ -43,17 +43,37 @@ class AudioModeLeaseManagerTest {
     }
 
     /**
-     * The case the device log shows on a call: the telephony stack owns the mode, so asking for
-     * MODE_IN_COMMUNICATION neither succeeds nor is needed. The uplink has to start anyway - a
-     * refused mode used to abort it and leave the other party with silence.
+     * The case the device log shows on a call: the telephony stack already holds MODE_IN_CALL, and
+     * the recorder must still be created on the communication path, so the write has to be attempted.
      */
     @Test
-    fun capturesUnderTheCallModeTheTelephonyStackAlreadySet() {
+    fun attemptsTheWriteEvenWhenTheCallModeIsAlreadySet() {
         val audio = FakeAudioMode(IN_CALL)
+        val degraded = mutableListOf<Int>()
+        val acquired = mutableListOf<String>()
+        val lease = manager(audio, degraded = degraded, acquired = acquired).acquire()
+
+        assertEquals(1, audio.writes)
+        assertEquals(COMMUNICATION, audio.mode)
+        assertEquals(listOf("found=2 attemptedWrite=true effective=3"), acquired)
+        assertEquals(emptyList<Int>(), degraded)
+
+        lease.close()
+        // The mode was ours to change, so it goes back to the call mode the telephony stack had.
+        assertEquals(IN_CALL, audio.mode)
+    }
+
+    /**
+     * And when the write is refused, the call mode it stayed in is still a communication mode: the
+     * uplink continues, and that refusal is not something to warn about.
+     */
+    @Test
+    fun continuesQuietlyWhenTheWriteIsRefusedButTheCallModeHolds() {
+        val audio = FakeAudioMode(IN_CALL, acceptsWrites = false)
         val degraded = mutableListOf<Int>()
         val lease = manager(audio, degraded = degraded).acquire()
 
-        assertEquals(0, audio.writes)
+        assertEquals(1, audio.writes)
         assertEquals(emptyList<Int>(), degraded)
 
         lease.close()
@@ -87,10 +107,10 @@ class AudioModeLeaseManagerTest {
         manager(FakeAudioMode(NORMAL), acquired = fromNormal).acquire().close()
         assertEquals(listOf("found=0 attemptedWrite=true effective=3"), fromNormal)
 
-        // Already in the call mode: nothing written, and the value is what the capture ran under.
+        // Already in the call mode: still written, and the value it settled on is reported too.
         val fromCall = mutableListOf<String>()
-        manager(FakeAudioMode(IN_CALL), acquired = fromCall).acquire().close()
-        assertEquals(listOf("found=2 attemptedWrite=false effective=2"), fromCall)
+        manager(FakeAudioMode(IN_CALL, acceptsWrites = false), acquired = fromCall).acquire().close()
+        assertEquals(listOf("found=2 attemptedWrite=true effective=2"), fromCall)
     }
 
     @Test
