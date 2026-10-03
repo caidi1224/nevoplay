@@ -189,6 +189,21 @@ class CarPlayController(
     private var permissionPollGeneration = 0
     private var reenumerationAttempts = 0
     private var lastReportedStatus: CarPlayStatus? = null
+
+    /**
+     * When the reported stage last changed, and how long a stall has already been reported for.
+     *
+     * The staged log this controller already writes is a transcript of *transitions*: it says which
+     * step was entered and never that a step is still the one we are on. A driver reporting "it just
+     * sits there" then has nothing to point at - the transcript for a stalled bring-up is identical
+     * to one that advanced a moment later. This is the other half: while a stage holds, say so, with
+     * the facts that stage depends on.
+     */
+    private var stageStartedNs = 0L
+    private var stageStallReportedMs = 0L
+
+    /** Bonded phones the last wireless attempt could see. Zero is a different problem from stuck. */
+    @Volatile private var lastWirelessCandidateCount = -1
     private var mfiResetLogged = false
 
     @Volatile private var closed = false
@@ -345,6 +360,7 @@ class CarPlayController(
             if (closed) return
         }
         CarPlayMediaSessionBridge.attach(appContext, this, ::sendMediaRemoteCommand)
+        mainHandler.postDelayed(stageWatchdog, STAGE_STALL_WATCH_INTERVAL_MILLIS)
         if (config.transport == CarPlayTransport.WIRED) {
             permissionCloseable = iphoneHost.registerPermissionReceiver(::onIphonePermission)
             attachCloseable = iphoneHost.registerAttachReceiver(::onIphoneAttached)
@@ -481,6 +497,7 @@ class CarPlayController(
             if (closed) return
             closed = true
         }
+        mainHandler.removeCallbacks(stageWatchdog)
         closeReceivers()
         stopFileTransferReceivers()
         availabilityPollGeneration.incrementAndGet()
@@ -1002,6 +1019,7 @@ class CarPlayController(
             if (!adapter.isEnabled) throw IOException("Bluetooth is not enabled")
             val devices = selectWirelessBluetoothDevices(adapter)
             val hostBluetoothMac = accessoryBluetoothMac(adapter)
+            lastWirelessCandidateCount = devices.size
             debugLog(
                 "wireless Bluetooth PHONE_SMART candidates=${devices.size} " +
                     "localBt=$hostBluetoothMac",
@@ -2121,9 +2139,44 @@ class CarPlayController(
         mainHandler.post {
             if (!closed && status != lastReportedStatus) {
                 lastReportedStatus = status
+                stageStartedNs = System.nanoTime()
+                stageStallReportedMs = 0L
                 uiListener?.onDebugLog(status.debugLogMessage())
                 uiStatusReporter?.invoke(status)
             }
+        }
+    }
+
+    /**
+     * Reports a stage that has not moved, so a stalled bring-up is visible as a stall.
+     *
+     * Modelled on a peer project's wireless diagnostics (DiPlay PR #154), which separates a stuck
+     * start into its stages instead of logging one opaque failure: the stages already exist here as
+     * [CarPlayStatus], and what was missing was any statement that one of them is where things
+     * stopped.
+     */
+    private fun reportStageStall() {
+        val status = lastReportedStatus ?: return
+        val startedNs = stageStartedNs
+        if (startedNs == 0L) return
+        val heldMs = (System.nanoTime() - startedNs) / 1_000_000L
+        if (heldMs < STAGE_STALL_REPORT_MILLIS) return
+        if (heldMs - stageStallReportedMs < STAGE_STALL_REPORT_MILLIS) return
+        stageStallReportedMs = heldMs
+        val candidates = lastWirelessCandidateCount
+        debugLog(
+            "STEP stalled for=${heldMs / 1000}s held=${status.debugLogMessage()} " +
+                "hotspot=${hotspot != null} bonjour=${bonjour != null} " +
+                "session=${activeSession != null} " +
+                "pairedPhones=${if (candidates < 0) "unknown" else candidates.toString()}",
+        )
+    }
+
+    private val stageWatchdog = object : Runnable {
+        override fun run() {
+            if (closed) return
+            reportStageStall()
+            mainHandler.postDelayed(this, STAGE_STALL_WATCH_INTERVAL_MILLIS)
         }
     }
 
@@ -2205,6 +2258,12 @@ class CarPlayController(
         private const val VPN_CONNECT_TIMEOUT_MILLIS = 10_000L
         private const val CONTROL_BRING_UP_TIMEOUT_MILLIS = 5 * 60_000L
         private const val PERMISSION_POLL_INTERVAL_MILLIS = 500L
+
+        /** How often a held stage is examined. */
+        private const val STAGE_STALL_WATCH_INTERVAL_MILLIS = 5_000L
+
+        /** How long a stage has to hold before saying so, and between repeats. */
+        private const val STAGE_STALL_REPORT_MILLIS = 30_000L
         private const val PERMISSION_POLL_TIMEOUT_MILLIS = 120_000L
         private const val DEVICE_AVAILABILITY_POLL_INTERVAL_MILLIS = 2_000L
         private const val WIRELESS_HANDOFF_TIMEOUT_MILLIS = 45_000L
