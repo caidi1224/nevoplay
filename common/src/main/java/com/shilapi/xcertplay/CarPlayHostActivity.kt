@@ -267,6 +267,8 @@ class CarPlayHostActivity : ComponentActivity() {
     private var idlePanel: View? = null
     /** Covers the last decoded frame whenever no screen stream is active. */
     private var videoBackdropView: View? = null
+    /** Set while the link has gone quiet: the picture on screen is stale, not live. */
+    private var linkSilent = false
     private var idleTransportValue: TextView? = null
     private var idleHotspotValue: TextView? = null
     private var idleMfiValue: TextView? = null
@@ -4177,6 +4179,28 @@ class CarPlayHostActivity : ComponentActivity() {
                 }
             }
 
+            override fun onLinkSilent(session: AirPlaySession, silentMs: Long) {
+                runOnUiThread {
+                    if (controllerGeneration != restartGeneration) return@runOnUiThread
+                    linkSilent = true
+                    // Not a reconnect: the session is left alone, so a link that comes back keeps its
+                    // CarPlay session. This only stops the last frame being presented as if it were
+                    // live, which is what "stuck on the CarPlay screen" actually was.
+                    if (!menuOpen) setConnectionStage("CarPlay link quiet; waiting for the phone")
+                    appendLog("AirPlay link silent for ${silentMs / 1000}s; covering the last frame")
+                    updateDebugOverlays()
+                }
+            }
+
+            override fun onLinkActive(session: AirPlaySession, resumedAfterMs: Long) {
+                runOnUiThread {
+                    if (controllerGeneration != restartGeneration) return@runOnUiThread
+                    linkSilent = false
+                    appendLog("AirPlay link resumed after ${resumedAfterMs / 1000}s")
+                    updateDebugOverlays()
+                }
+            }
+
             override fun onSessionEnded(session: AirPlaySession) {
                 runOnUiThread {
                     if (activeAirPlaySession === session) activeAirPlaySession = null
@@ -4185,6 +4209,7 @@ class CarPlayHostActivity : ComponentActivity() {
                         return@runOnUiThread
                     }
                     activeScreenStreamTypes.clear()
+                    linkSilent = false
                     setConnectionStage("CarPlay session ended; reconnecting")
                     appendLog("AirPlay session ended; reconnecting from scratch")
                     reconnectAfterLoss("AirPlay session ended")
@@ -4953,19 +4978,21 @@ class CarPlayHostActivity : ComponentActivity() {
     private fun updateDebugOverlays() {
         val showLogs = debugLogsEnabled && !menuOpen
         statusScrollView?.visibility = if (showLogs) View.VISIBLE else View.GONE
-        val idle = !menuOpen && activeScreenStreamTypes.isEmpty()
+        // A silent link means the picture is stale even though the stream is still nominally set
+        // up, so it counts as idle: the CarPlay session survives, only the presentation changes.
+        val idle = !menuOpen && (activeScreenStreamTypes.isEmpty() || linkSilent)
         idlePanel?.visibility = if (idle) View.VISIBLE else View.GONE
-        // Tied to the same condition: the picture is only worth showing while a stream is active,
-        // and a stream state that flips mid-session would flash this. It does not - across a day of
-        // logs the stream went active and inactive only at session boundaries.
+        // Same condition: the picture is only worth presenting while a stream is active and the link
+        // is quiet-free. The stream state itself only flips at session boundaries (8 times active and
+        // 5 inactive across a day of logs), so the only thing that moves this mid-session is the
+        // 8-second silence notice - which is the point of it.
         videoBackdropView?.visibility = if (idle) View.VISIBLE else View.GONE
         updateIdlePanel()
-        val showStage = !menuOpen && activeScreenStreamTypes.isEmpty()
+        val showStage = idle
         stageStatusView?.visibility = if (showStage) View.VISIBLE else View.GONE
         // The build stamp sits under the picture, not on top of it: as soon as a screen stream is
         // active the CarPlay image is what the driver should see.
-        buildLabelView?.visibility =
-            if (!menuOpen && activeScreenStreamTypes.isEmpty()) View.VISIBLE else View.GONE
+        buildLabelView?.visibility = if (idle) View.VISIBLE else View.GONE
         if (showStage != lastStageOverlayShown) {
             lastStageOverlayShown = showStage
             appendLog(

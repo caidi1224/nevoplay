@@ -12,6 +12,7 @@ import java.net.DatagramSocket
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.ServerSocket
+import java.net.SocketTimeoutException
 import java.net.Socket
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicBoolean
@@ -27,6 +28,18 @@ data class AirPlayDeviceInfo(
 interface AirPlaySessionListener {
     fun onSessionActive(session: AirPlaySession) {}
     fun onSessionEnded(session: AirPlaySession) {}
+
+    /**
+     * The link has been quiet for long enough that whatever is on screen is stale.
+     *
+     * Not a session end: the host is expected to stop presenting the last picture as if it were
+     * live, and to keep presenting it again if [onLinkActive] follows. Nothing else changes.
+     */
+    fun onLinkSilent(session: AirPlaySession, silentMs: Long) {}
+
+    /** Data is arriving again after an [onLinkSilent]. */
+    fun onLinkActive(session: AirPlaySession, resumedAfterMs: Long) {}
+
     fun onTransportError(message: String) {}
     fun onDeviceInfo(session: AirPlaySession, info: AirPlayDeviceInfo) {}
     fun onHostUiRequested(session: AirPlaySession) {}
@@ -257,13 +270,39 @@ class AirPlaySession(
         var accumulated = ByteArray(0)
         val buffer = ByteArray(READ_CHUNK_BYTES)
         var closeReason = "session closed"
+        // Wake the read up so silence can be represented at all. The phone posts /feedback about
+        // every 2 s while the link is up, and a read with no timeout cannot tell "nothing yet" from
+        // "the phone is gone" - which is how a driver ends up looking at a frozen picture for eight
+        // minutes (19:08:40 -> 19:17:22 of nothing, with no session end in between).
+        runCatching { socket.soTimeout = CONTROL_READ_POLL_MS }
+        var lastActivityNs = System.nanoTime()
+        var silenceReported = false
         try {
             while (!closed.get()) {
-                val count = input.read(buffer)
+                val count = try {
+                    input.read(buffer)
+                } catch (_: SocketTimeoutException) {
+                    val silentMs = (System.nanoTime() - lastActivityNs) / 1_000_000L
+                    if (silentMs >= HOST_SILENCE_LIMIT_MS) {
+                        closeReason = "host silent for ${silentMs / 1000}s"
+                        break
+                    }
+                    if (silentMs >= LINK_IDLE_NOTICE_MS && !silenceReported) {
+                        silenceReported = true
+                        listener.onLinkSilent(this, silentMs)
+                    }
+                    continue
+                }
                 if (count < 0) {
                     closeReason = "peer EOF"
                     break
                 }
+                val nowNs = System.nanoTime()
+                if (silenceReported) {
+                    silenceReported = false
+                    listener.onLinkActive(this, (nowNs - lastActivityNs) / 1_000_000L)
+                }
+                lastActivityNs = nowNs
                 var plaintext = buffer.copyOf(count)
                 val activeCipher = cipher
                 if (activeCipher != null) {
@@ -729,6 +768,28 @@ class AirPlaySession(
         const val STREAM_TYPE_DATA = 130
 
         const val READ_CHUNK_BYTES = 16 * 1024
+
+        /** How long a control read waits before the loop re-checks whether the phone is still there. */
+        const val CONTROL_READ_POLL_MS = 1_000
+
+        /**
+         * Quiet time after which the picture on screen is treated as stale and covered.
+         *
+         * Measured over one day of logs: /feedback arrives every 2.02 s at the median (6567
+         * samples), and gaps of 10, 12, 16, 23 and 42 s were seen with the picture frozen for their
+         * duration. 8 s is above the heartbeat and inside that range, so the cover appears while the
+         * link is genuinely quiet and disappears the moment data returns.
+         */
+        const val LINK_IDLE_NOTICE_MS = 8_000L
+
+        /**
+         * Quiet time after which the phone is treated as gone and the session is rebuilt.
+         *
+         * Deliberately far above the longest gap that recovered on its own (42.3 s): rebuilding is
+         * what hands the P2P stack another chance to wedge, so it waits until waiting is clearly
+         * pointless. The incident this exists for is 521.6 s of nothing at all.
+         */
+        const val HOST_SILENCE_LIMIT_MS = 120_000L
         const val EVENT_READY_POLL_MILLIS = 25L
         const val NANOS_PER_MILLISECOND = 1_000_000L
     }

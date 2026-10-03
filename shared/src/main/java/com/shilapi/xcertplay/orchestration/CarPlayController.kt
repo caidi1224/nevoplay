@@ -267,6 +267,16 @@ class CarPlayController(
             uiListener?.onTransportError(message)
         }
 
+        override fun onLinkSilent(session: AirPlaySession, silentMs: Long) {
+            debugLog("airplay link silent for ${silentMs / 1000}s; the picture on screen is stale")
+            uiListener?.onLinkSilent(session, silentMs)
+        }
+
+        override fun onLinkActive(session: AirPlaySession, resumedAfterMs: Long) {
+            debugLog("airplay link resumed after ${resumedAfterMs / 1000}s")
+            uiListener?.onLinkActive(session, resumedAfterMs)
+        }
+
         override fun onDeviceInfo(session: AirPlaySession, info: AirPlayDeviceInfo) {
             debugLog(
                 "AirPlay device info name=${info.name} deviceId=${info.deviceId} " +
