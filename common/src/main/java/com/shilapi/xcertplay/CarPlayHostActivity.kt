@@ -265,6 +265,8 @@ class CarPlayHostActivity : ComponentActivity() {
     private var videoView: TextureView? = null
     private var gestureOverlay: View? = null
     private var idlePanel: View? = null
+    /** Covers the last decoded frame whenever no screen stream is active. */
+    private var videoBackdropView: View? = null
     private var idleTransportValue: TextView? = null
     private var idleHotspotValue: TextView? = null
     private var idleMfiValue: TextView? = null
@@ -778,6 +780,20 @@ class CarPlayHostActivity : ComponentActivity() {
                 FrameLayout.LayoutParams.MATCH_PARENT,
             ),
         )
+        // Opaque, and above the picture but below the idle panel. A TextureView keeps its last
+        // frame, so the panel alone leaves the driver looking at a frozen CarPlay image: a device log
+        // shows the banner being shown on every disconnect (11:56, 15:10, 16:04), which is not what
+        // "the app is stuck on the CarPlay screen" looks like from the seat. Nothing else draws here,
+        // so covering it is enough - no need to touch the surface the phone is negotiating with.
+        val videoBackdrop = View(this).apply { setBackgroundColor(MENU_BACKGROUND) }
+        root.addView(
+            videoBackdrop,
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT,
+            ),
+        )
+        videoBackdropView = videoBackdrop
         contentRoot = root
         // The metrics overlay is a third of the panel and does not re-lay-out itself on a resize.
         root.addOnLayoutChangeListener { _, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom ->
@@ -4937,8 +4953,12 @@ class CarPlayHostActivity : ComponentActivity() {
     private fun updateDebugOverlays() {
         val showLogs = debugLogsEnabled && !menuOpen
         statusScrollView?.visibility = if (showLogs) View.VISIBLE else View.GONE
-        idlePanel?.visibility =
-            if (!menuOpen && activeScreenStreamTypes.isEmpty()) View.VISIBLE else View.GONE
+        val idle = !menuOpen && activeScreenStreamTypes.isEmpty()
+        idlePanel?.visibility = if (idle) View.VISIBLE else View.GONE
+        // Tied to the same condition: the picture is only worth showing while a stream is active,
+        // and a stream state that flips mid-session would flash this. It does not - across a day of
+        // logs the stream went active and inactive only at session boundaries.
+        videoBackdropView?.visibility = if (idle) View.VISIBLE else View.GONE
         updateIdlePanel()
         val showStage = !menuOpen && activeScreenStreamTypes.isEmpty()
         stageStatusView?.visibility = if (showStage) View.VISIBLE else View.GONE
