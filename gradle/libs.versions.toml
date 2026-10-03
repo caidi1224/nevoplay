@@ -15,8 +15,8 @@ concentus = "1.0.0"
 media3 = "1.11.1"
 
 # 应用自身版本：每交付一个改动，末尾小版本号 +1（约定见 AGENTS.md）。
-xcertplayVersionName = "1.3.2.43"
-xcertplayVersionCode = "130243"
+xcertplayVersionName = "1.3.2.44"
+xcertplayVersionCode = "130244"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }

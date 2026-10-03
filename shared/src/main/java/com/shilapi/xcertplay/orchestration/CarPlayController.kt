@@ -2156,6 +2156,12 @@ class CarPlayController(
      * stopped.
      */
     private fun reportStageStall() {
+        // A live session is the opposite of a stall. The first version of this had no such guard and
+        // dutifully reported the success stage - "held=STEP handoff/complete ... session=true" every
+        // 30 s - because a stage that has finished its job naturally stops changing. Ten lines of
+        // false alarms in the first log that carried it, and only because the observation was read
+        // rather than trusted.
+        if (activeSession != null) return
         val status = lastReportedStatus ?: return
         val startedNs = stageStartedNs
         if (startedNs == 0L) return
