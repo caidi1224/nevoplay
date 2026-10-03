@@ -2,6 +2,9 @@ package com.shilapi.xcertplay.media
 
 import android.content.Context
 import android.media.AudioRecord
+import android.media.audiofx.AcousticEchoCanceler
+import android.media.audiofx.AudioEffect
+import android.media.audiofx.NoiseSuppressor
 import android.util.Log
 import com.shilapi.xcertplay.airplay.AudioCodecKind
 import com.shilapi.xcertplay.airplay.MicrophoneConfig
@@ -39,6 +42,8 @@ internal class MicrophoneUplink(
     @Volatile private var recorder: AudioRecord? = null
     @Volatile private var socket: DatagramSocket? = null
     @Volatile private var opusEncoder: OpusEncoder? = null
+    /** Platform voice effects on the capture session, telephony only. Closed with the uplink. */
+    @Volatile private var voiceEffects: List<AudioEffect> = emptyList()
     private var thread: Thread? = null
 
     fun start(): Boolean {
@@ -80,6 +85,13 @@ internal class MicrophoneUplink(
         }
         socket = nextSocket
 
+        // A call is the one capture that has to go through the platform's voice path: the echo
+        // canceller is what keeps the car's own output out of the uplink, and without it the other
+        // party hears themselves. Taken from a peer project (DiPlay PR #116), including its rule that
+        // a vendor ROM may advertise an effect and then refuse to enable it - keep recording anyway.
+        if (config.audioType == "telephony") {
+            voiceEffects = voiceEffects(nextRecorder.audioSessionId)
+        }
         nextRecorder.startRecording()
         thread = Thread({ capture(nextRecorder, nextSocket) }, "carplay-mic").apply {
             isDaemon = true
@@ -213,8 +225,44 @@ internal class MicrophoneUplink(
     }
 
     @Synchronized
+    private fun voiceEffects(sessionId: Int): List<AudioEffect> = listOfNotNull(
+        enabledEffect("AEC") {
+            if (AcousticEchoCanceler.isAvailable()) AcousticEchoCanceler.create(sessionId) else null
+        },
+        enabledEffect("NS") {
+            if (NoiseSuppressor.isAvailable()) NoiseSuppressor.create(sessionId) else null
+        },
+    )
+
+    private fun enabledEffect(name: String, create: () -> AudioEffect?): AudioEffect? {
+        var effect: AudioEffect? = null
+        try {
+            effect = create()
+            if (effect == null) {
+                report("microphone effect=$name unavailable")
+                return null
+            }
+            val status = effect.setEnabled(true)
+            if (status == AudioEffect.SUCCESS && effect.enabled) {
+                report("microphone effect=$name enabled=true")
+                return effect
+            }
+            Log.w(TAG, "microphone effect=$name could not be enabled status=$status")
+            report("microphone effect=$name enabled=false status=$status")
+        } catch (error: RuntimeException) {
+            Log.w(TAG, "microphone effect=$name unavailable; continuing without it", error)
+            report("microphone effect=$name failed=${error.javaClass.simpleName}")
+        }
+        effect?.let { runCatching { it.release() } }
+        return null
+    }
+
     private fun release() {
         running.set(false)
+
+        val currentEffects = voiceEffects
+        voiceEffects = emptyList()
+        currentEffects.forEach { effect -> runCatching { effect.release() } }
 
         val currentRecorder = recorder
         recorder = null
