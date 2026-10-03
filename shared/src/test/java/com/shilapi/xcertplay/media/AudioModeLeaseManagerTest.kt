@@ -77,6 +77,22 @@ class AudioModeLeaseManagerTest {
         assertEquals(NORMAL, audio.mode)
     }
 
+    /**
+     * The line that was missing when AudioFlinger refused 12 of 14 attempts to open the call
+     * microphone: the mode the capture actually ran under, so the refusal can be tied to a value.
+     */
+    @Test
+    fun reportsTheModeItFoundAndWhatItDid() {
+        val fromNormal = mutableListOf<String>()
+        manager(FakeAudioMode(NORMAL), acquired = fromNormal).acquire().close()
+        assertEquals(listOf("found=0 attemptedWrite=true effective=3"), fromNormal)
+
+        // Already in the call mode: nothing written, and the value is what the capture ran under.
+        val fromCall = mutableListOf<String>()
+        manager(FakeAudioMode(IN_CALL), acquired = fromCall).acquire().close()
+        assertEquals(listOf("found=2 attemptedWrite=false effective=2"), fromCall)
+    }
+
     @Test
     fun holdsTheModeUntilTheLastLeaseCloses() {
         val audio = FakeAudioMode(NORMAL)
@@ -94,11 +110,15 @@ class AudioModeLeaseManagerTest {
     private fun manager(
         audio: FakeAudioMode,
         degraded: MutableList<Int> = mutableListOf(),
+        acquired: MutableList<String> = mutableListOf(),
     ) = AudioModeLeaseManager(
         readMode = { audio.mode },
         writeMode = audio::write,
         communicationMode = COMMUNICATION,
         acceptableModes = setOf(COMMUNICATION, IN_CALL),
+        onAcquired = { found, attemptedWrite, effective ->
+            acquired += "found=$found attemptedWrite=$attemptedWrite effective=$effective"
+        },
         onDegraded = { degraded += it },
     )
 

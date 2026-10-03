@@ -86,6 +86,8 @@ internal class AudioModeLeaseManager(
     private val writeMode: (Int) -> Unit,
     private val communicationMode: Int,
     private val acceptableModes: Set<Int> = setOf(communicationMode),
+    private val onAcquired: (found: Int, attemptedWrite: Boolean, effective: Int) -> Unit =
+        { _, _, _ -> },
     private val onDegraded: (actualMode: Int) -> Unit = {},
 ) {
     private var users = 0
@@ -99,6 +101,7 @@ internal class AudioModeLeaseManager(
             changedMode = previousMode !in acceptableModes
             if (changedMode) writeMode(communicationMode)
             val effectiveMode = readMode()
+            onAcquired(previousMode, changedMode, effectiveMode)
             if (effectiveMode !in acceptableModes) {
                 // Something else owns the mode and refused ours. Capture anyway: a recorder that
                 // runs with the wrong route beats one that never starts.
@@ -143,6 +146,21 @@ internal object MicrophoneAudioMode {
                 writeMode = { audioManager.mode = it },
                 communicationMode = AudioManager.MODE_IN_COMMUNICATION,
                 acceptableModes = COMMUNICATION_MODES,
+                // Which mode the capture is about to run under, recorded before the recorder is
+                // built rather than only when it looks wrong: a device log showed AudioFlinger
+                // refusing the record track on 12 of the 14 attempts to open the call microphone,
+                // and nothing in it said what the mode was when that happened. Paired with the line
+                // below on success and the recorder error on failure, one call decides whether
+                // MODE_IN_CALL is what AudioFlinger objects to.
+                onAcquired = { found, attemptedWrite, effective ->
+                    Log.i(
+                        TAG,
+                        "microphone audio mode found=$found attemptedWrite=$attemptedWrite " +
+                            "effective=$effective " +
+                            "communicationMode=${AudioManager.MODE_IN_COMMUNICATION} " +
+                            "callMode=${AudioManager.MODE_IN_CALL}",
+                    )
+                },
                 onDegraded = { actualMode ->
                     Log.w(
                         TAG,
