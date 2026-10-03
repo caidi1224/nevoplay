@@ -5133,6 +5133,10 @@ class CarPlayHostActivity : ComponentActivity() {
                 "xcertplay log started " +
                     "${SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US).format(Date())} " +
                     "pid=${Process.myPid()} build=${BuildConfig.BUILD_ID} " +
+                    // The commit alone is ambiguous: a build from a dirty tree reports the commit it
+                    // was based on, so a log can claim the previous version - which happened, and cost
+                    // a round of "which build produced this?". The version name cannot lie.
+                    "version=${BuildConfig.APP_VERSION} " +
                     "path=${activeLog.destination}",
             )
         }

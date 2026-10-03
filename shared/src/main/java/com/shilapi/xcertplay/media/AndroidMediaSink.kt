@@ -42,10 +42,9 @@ class AndroidMediaSink(
     onScreenStreamActiveChanged: ((Int, Boolean) -> Unit)? = null,
     onVideoFrameRendered: (() -> Unit)? = null,
     /**
-     * Media diagnostics that have to survive, as lines the session log holds directly. Log.i reaches
-     * the session log only through a logcat tap that loses lines, and both a call's microphone
-     * lifecycle and a track's recovery from an underrun are things nothing else in the log can stand
-     * in for.
+     * Microphone diagnostics that have to survive, as lines the session log holds directly. Log.i
+     * reaches the session log only through a logcat tap that loses lines, and a call's microphone
+     * lifecycle is the one thing about a call that nothing else in the log can stand in for.
      */
     onMediaDiagnostic: ((String) -> Unit)? = null,
 ) : MediaSink {
@@ -194,7 +193,6 @@ class AndroidMediaSink(
             advancedAudioChannelMapping,
             mainMediaAudioBufferDurationMs,
             mediaMetricsMonitor,
-            diagnostic = { message -> mediaDiagnostic?.invoke(message) },
         ).also { audioRenderers[id] = it }
     }
 }
@@ -731,8 +729,6 @@ private class AudioRenderer(
     private val advancedAudioChannelMapping: Boolean,
     private val mainMediaAudioBufferDurationMs: Int,
     mediaMetricsMonitor: MediaMetricsMonitor?,
-    /** Lines that have to survive in the session log. See AndroidMediaSink.onMediaDiagnostic. */
-    private val diagnostic: (String) -> Unit = {},
 ) : Closeable {
     private data class AudioPacket(val rtp: ByteArray, val sample: Int)
 
@@ -743,31 +739,8 @@ private class AudioRenderer(
     private var track: AudioTrack? = null
     private var pcm = ByteArray(64 * 1024)
     private var playbackStarted = false
-
-    /**
-     * Call and assistant audio is held inside a band instead of being played as it arrives.
-     *
-     * See CallAudioBuffer for why, and for what it measured. Media streams are deliberately left
-     * alone: their latency budget is a user setting, and music has no other party waiting on it.
-     */
-    private val isCallStream =
-        format.audioType == "telephony" || format.audioType == "speechrecognition"
-
-    /**
-     * Where the band's depth is measured from.
-     *
-     * `totalBytesWritten - playbackHeadPosition` is the whole track's life, and the framework takes the
-     * buffered audio away when it disables a track for underrunning (`releaseBuffer`), so that
-     * arithmetic would count audio that is already gone as if it were queued - and resume playback on
-     * a track that is empty. The bases are re-set at every hold, carrying forward only what the track
-     * is known to still hold.
-     */
-    private var bandBaseFramesWritten = 0L
-    private var bandBasePlaybackHead = 0L
     private var prebufferBytes = 0
     private var startThresholdBytes = 0
-    /** Underruns seen so far on this track, to notice that the framework has disabled it. */
-    private var lastUnderrunCount = 0
     private var fadeApplied = false
     private var droppedPacketsLogged = false
     private var firstAacPayloadLogged = false
@@ -904,8 +877,6 @@ private class AudioRenderer(
                 channelCount = format.channels,
                 minBufferBytes = minBuffer,
             )
-        } else if (isCallStream) {
-            CallAudioBuffer.trackBufferBytes(format.sampleRate, trackChannelCount, minBuffer)
         } else {
             maxOf(minBuffer * 4, MIN_TRACK_BUFFER_BYTES)
         }
@@ -1156,7 +1127,6 @@ private class AudioRenderer(
         }
         var written = 0
         while (written < length && running) {
-            holdCallBandIfRunningLow(track)
             val writeLength = if (playbackStarted) {
                 length - written
             } else {
@@ -1180,16 +1150,7 @@ private class AudioRenderer(
             }
             if (!playbackStarted) {
                 prebufferBytes += count
-                // A call resumes on how much audio is queued, not on how much this write call added:
-                // after a hold the track still holds what it held, and asking for the high-water mark
-                // on top of that would overrun the capacity - where write() blocks on a paused track
-                // and never returns.
-                val ready = if (isCallStream) {
-                    bandDepthMs(track) >= CallAudioBuffer.HIGH_WATER_MS
-                } else {
-                    prebufferBytes >= startThresholdBytes
-                }
-                if (ready) {
+                if (prebufferBytes >= startThresholdBytes) {
                     track.play()
                     playbackStarted = true
                     playbackStartedNs = System.nanoTime()
@@ -1215,102 +1176,17 @@ private class AudioRenderer(
      * worse. Device logs showed single `decoder input unavailable ... dropped=1` events with
      * neither number recorded, which is exactly the ambiguity this line removes.
      */
-    /**
-     * Puts the track back into its prebuffering state after the framework has disabled it for
-     * underrunning.
-     *
-     * The first underrun is not what hurts; what follows it is. Android answers an underrun by
-     * disabling the track and releasing its buffer, so the reserve the stream started with is gone -
-     * and nothing rebuilds it, because the arrival rate sits on real time: the phone asks for
-     * `audioLatencyMs=80` on a call against 1000 on media, so a call is paced with almost no slack
-     * (`queue=0/64` in 18 of 20 windows of a measured call). Every later jitter spike then underruns
-     * an empty track, which is the cascade the log shows: a few underruns in the first seconds, then
-     * one every three seconds for the rest of the call, with `restartIfDisabled` fourteen times.
-     *
-     * Holding the audio back until [startThresholdBytes] are queued again is the one thing this side
-     * can do about it: it converts a recurring framework restart into one deliberate, bounded
-     * prebuffer. It cannot create audio the phone never sent - if the supply itself is short, this
-     * will show up as longer gaps, which is why the outcome is logged.
-     */
-    /** Audio queued since the last hold, carrying forward what the track still held at that point. */
-    private fun bandDepthMs(track: AudioTrack): Long {
-        if (trackBytesPerFrame <= 0 || format.sampleRate <= 0) return 0L
-        val produced = totalBytesWritten / trackBytesPerFrame - bandBaseFramesWritten
-        val consumed = playbackHeadFrames(track) - bandBasePlaybackHead
-        return (produced - consumed).coerceAtLeast(0L) * 1000L / format.sampleRate
-    }
-
-    /**
-     * Keeps a call inside its band: playback stops when the queued audio falls to the low-water mark
-     * and resumes at the high-water mark.
-     *
-     * The band is what the driver asked for after the reactive version - which waited for an underrun
-     * and therefore always paid for the click first - removed the framework's disable-and-restart
-     * cascade but left one underrun every 4.2 seconds. Waiting for a framework underrun to act is too
-     * late by construction, so the depth is now watched continuously. That check is also the reason
-     * every hold carries a recorded depth: the band is a latency budget, and a budget nobody can see
-     * is one nobody can tune.
-     */
-    private fun holdCallBandIfRunningLow(track: AudioTrack) {
-        if (!isCallStream) {
-            rearmPrebufferAfterUnderrun(track)
-            return
-        }
-        val underruns = runCatching { track.underrunCount }.getOrDefault(lastUnderrunCount)
-        val ranDry = underruns > lastUnderrunCount
-        lastUnderrunCount = underruns
-        if (!playbackStarted) return
-        val depth = bandDepthMs(track)
-        if (!ranDry && depth > CallAudioBuffer.LOW_WATER_MS) return
-
-        // A framework underrun means the buffered audio was taken away, so nothing carries forward;
-        // a band hold means the track still holds what was measured.
-        val heldFrames = if (ranDry) 0L else depth * format.sampleRate / 1000L
-        bandBaseFramesWritten = totalBytesWritten / trackBytesPerFrame - heldFrames
-        bandBasePlaybackHead = playbackHeadFrames(track)
-        playbackStarted = false
-        prebufferBytes = 0
-        runCatching { track.pause() }
-        val message =
-            "audio band hold type=${format.payloadType} audioType=${format.audioType} " +
-                "reason=${if (ranDry) "underrun=$underruns" else "depthMs=$depth"} " +
-                "heldMs=$depth lowWaterMs=${CallAudioBuffer.LOW_WATER_MS} " +
-                "targetMs=${CallAudioBuffer.HIGH_WATER_MS}"
-        Log.i(TAG, message)
-        diagnostic(message)
-    }
-
-    private fun rearmPrebufferAfterUnderrun(track: AudioTrack) {
-        val underruns = runCatching { track.underrunCount }.getOrDefault(lastUnderrunCount)
-        if (underruns <= lastUnderrunCount) return
-        lastUnderrunCount = underruns
-        if (!playbackStarted) return
-        playbackStarted = false
-        prebufferBytes = 0
-        runCatching { track.pause() }
-        val message =
-            "audio prebuffer re-armed type=${format.payloadType} " +
-                "audioType=${format.audioType} after underrun underruns=$underruns " +
-                "targetBytes=$startThresholdBytes"
-        Log.i(TAG, message)
-        diagnostic(message)
-    }
-
-    /** Milliseconds of decoded audio sitting in the track, awaiting the speaker. */
-    private fun bufferedMs(track: AudioTrack): Long {
-        if (trackBytesPerFrame <= 0 || format.sampleRate <= 0) return 0L
-        val framesWritten = totalBytesWritten / trackBytesPerFrame
-        val bufferedFrames = (framesWritten - playbackHeadFrames(track)).coerceAtLeast(0L)
-        return bufferedFrames * 1000L / format.sampleRate
-    }
-
     private fun logAudioStats() {
         val track = track ?: return
         val now = System.nanoTime()
         if (now - audioStatsStartNs < AUDIO_STATS_INTERVAL_NS) return
         val seconds = (now - audioStatsStartNs).toDouble() / NANOS_PER_SECOND
         val underruns = track.underrunCount
-        val bufferedMs = if (isCallStream) bandDepthMs(track) else bufferedMs(track)
+        val framesWritten =
+            if (trackBytesPerFrame > 0) totalBytesWritten / trackBytesPerFrame else 0L
+        val bufferedFrames = (framesWritten - playbackHeadFrames(track)).coerceAtLeast(0L)
+        val bufferedMs =
+            if (format.sampleRate > 0) bufferedFrames * 1000L / format.sampleRate else 0L
         Log.i(
             TAG,
             "audio stats type=${format.payloadType} codec=${format.codec} " +
