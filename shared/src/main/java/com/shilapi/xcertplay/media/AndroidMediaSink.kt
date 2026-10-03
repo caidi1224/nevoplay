@@ -747,6 +747,12 @@ private class AudioRenderer(
     private var audioStatsPackets = 0
     private var audioStatsUnderruns = 0
     private var audioStatsDropped = 0
+    // The other end of `audio playback started`: without it a log shows a stream beginning but
+    // never stopping, which is how "which stream was audible at that moment" became guesswork.
+    // See logTrackReleased().
+    private var playbackStartedNs = 0L
+    private var audioChannel: AudioChannel? = null
+    private var audioUsage = 0
     // Buffered-but-unplayed audio, for the latency monitor: bytes handed to the track, the play
     // head, and (where the platform reports one) the output-latency estimate.
     private var trackBytesPerFrame = 0
@@ -920,6 +926,10 @@ private class AudioRenderer(
         )
         val usage = usageFor(selection.channel)
         val contentType = contentTypeFor(selection.contentType)
+        // Kept for the release line, so one place names the channel and the usage both here and at
+        // the end of the track's life. Called once per track creation.
+        audioChannel = selection.channel
+        audioUsage = usage
         return AudioAttributes.Builder()
             .setUsage(usage)
             .setContentType(contentType)
@@ -1134,7 +1144,13 @@ private class AudioRenderer(
                 if (prebufferBytes >= startThresholdBytes) {
                     track.play()
                     playbackStarted = true
-                    Log.i(TAG, "audio playback started type=${format.payloadType}")
+                    playbackStartedNs = System.nanoTime()
+                    Log.i(
+                        TAG,
+                        "audio playback started type=${format.payloadType} " +
+                            "audioType=${format.audioType} channel=${audioChannel ?: "?"} " +
+                            "usage=$audioUsage",
+                    )
                 }
             }
         }
@@ -1264,6 +1280,7 @@ private class AudioRenderer(
         val track = track
         this.track = null
         if (track != null) {
+            logTrackReleased(track)
             try {
                 track.pause()
             } catch (_: Exception) {
@@ -1282,6 +1299,32 @@ private class AudioRenderer(
         }
     }
 
+    /**
+     * The other end of `audio playback started`.
+     *
+     * Nothing used to record when a track stopped, so a device log could show that a stream began
+     * and never that it ended. "Which stream was audible at that moment" then had to be inferred
+     * from the phone's TEARDOWN messages, which say what the phone stopped sending, not what this
+     * device stopped playing - and a perceived change in loudness arrived with no line to confirm or
+     * deny it. The channel and usage are repeated because those are the values the vehicle routes
+     * and ducks by, and the counters are repeated so one line summarises the whole track.
+     */
+    private fun logTrackReleased(track: AudioTrack) {
+        val playedMs = if (playbackStarted && playbackStartedNs != 0L) {
+            (System.nanoTime() - playbackStartedNs) / NANOS_PER_MILLISECOND
+        } else {
+            0L
+        }
+        Log.i(
+            TAG,
+            "audio track released type=${format.payloadType} audioType=${format.audioType} " +
+                "codec=${format.codec} channel=${audioChannel ?: "?"} usage=$audioUsage " +
+                "started=$playbackStarted playedMs=$playedMs " +
+                "underruns=${runCatching { track.underrunCount }.getOrDefault(-1)} " +
+                "bytesWritten=$totalBytesWritten codecDropped=$inputDropped",
+        )
+    }
+
     private companion object {
         const val TAG = "xcertplay-usb"
         const val AAC_OBJECT_TYPE_LC = 2
@@ -1295,6 +1338,7 @@ private class AudioRenderer(
         const val PREBUFFER_WRITE_CHUNK_BYTES = 2 * 1024
         const val DECODED_BUFFER_LOG_INTERVAL = 50
         const val AUDIO_TIMESTAMP_INTERVAL_NS = 200_000_000L
+        const val NANOS_PER_MILLISECOND = 1_000_000L
         /** Long enough that the line is one row per interval in a log, short enough to place a glitch. */
         const val AUDIO_STATS_INTERVAL_NS = 5_000_000_000L
         const val NANOS_PER_SECOND = 1_000_000_000L
