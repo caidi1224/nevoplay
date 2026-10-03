@@ -166,6 +166,7 @@ class WifiP2pGroupManager(
             removeGroupBlocking(activeChannel)
         }
         activeThread?.quitSafely()
+        releaseChannel(activeChannel)
     }
 
     private fun createChannelListener(
@@ -550,6 +551,25 @@ class WifiP2pGroupManager(
             removeGroupBlocking(failedChannel)
         }
         failedThread?.quitSafely()
+        releaseChannel(failedChannel)
+    }
+
+    /**
+     * Hands a channel back to the framework once the attempt that owns it is over.
+     *
+     * `initialize` registers a channel and a channel listener with the P2P service, and
+     * `p2pManager.initialize` runs again for *every* bring-up attempt, so a supervisor that retries
+     * for hours accumulates them: clearing the field and quitting the handler thread leaves the
+     * registration behind. Both teardown paths did exactly that.
+     *
+     * A device log is why this is worth fixing rather than tidying. Bring-up was refused for 86, 31
+     * and 99 minutes in three episodes on one day, 127 retries at 30 s apart, and two of the three
+     * ended the moment the app was restarted - a process exit being the one thing that unregisters
+     * every leaked channel at once. Called after the group removal, which needs a live channel.
+     */
+    private fun releaseChannel(channel: WifiP2pManager.Channel?) {
+        if (channel == null) return
+        runCatching { channel.close() }
     }
 
     private fun removeGroupBlocking(channel: WifiP2pManager.Channel) {
