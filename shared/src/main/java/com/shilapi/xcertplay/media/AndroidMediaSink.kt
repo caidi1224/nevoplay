@@ -42,16 +42,17 @@ class AndroidMediaSink(
     onScreenStreamActiveChanged: ((Int, Boolean) -> Unit)? = null,
     onVideoFrameRendered: (() -> Unit)? = null,
     /**
-     * The microphone's lifecycle as a line the session log can hold. Log.i reaches the session log
-     * only through a logcat tap that loses lines, and the microphone is the one part of a call that
-     * nothing else in the log can stand in for.
+     * Media diagnostics that have to survive, as lines the session log holds directly. Log.i reaches
+     * the session log only through a logcat tap that loses lines, and both a call's microphone
+     * lifecycle and a track's recovery from an underrun are things nothing else in the log can stand
+     * in for.
      */
-    onMicrophoneEvent: ((String) -> Unit)? = null,
+    onMediaDiagnostic: ((String) -> Unit)? = null,
 ) : MediaSink {
     private val defaultSurface = surface
     @Volatile private var screenStreamActiveChanged = onScreenStreamActiveChanged
     @Volatile private var videoFrameRendered = onVideoFrameRendered
-    @Volatile private var microphoneEvent = onMicrophoneEvent
+    @Volatile private var mediaDiagnostic = onMediaDiagnostic
     @Volatile private var firstFrameRendered = false
     private val surfaces = ConcurrentHashMap<Int, Surface>()
     private val videoDecoders = ConcurrentHashMap<Int, VideoDecoder>()
@@ -146,7 +147,7 @@ class AndroidMediaSink(
     override fun onMicrophoneStarted(id: AudioStreamId, config: MicrophoneConfig) {
         val uplink = microphoneUplinks.computeIfAbsent(id) {
             MicrophoneUplink(context, config, microphoneGainPercent) { message ->
-                microphoneEvent?.invoke(message)
+                mediaDiagnostic?.invoke(message)
             }
         }
         if (!uplink.start()) microphoneUplinks.remove(id, uplink)
@@ -193,6 +194,7 @@ class AndroidMediaSink(
             advancedAudioChannelMapping,
             mainMediaAudioBufferDurationMs,
             mediaMetricsMonitor,
+            diagnostic = { message -> mediaDiagnostic?.invoke(message) },
         ).also { audioRenderers[id] = it }
     }
 }
@@ -729,6 +731,8 @@ private class AudioRenderer(
     private val advancedAudioChannelMapping: Boolean,
     private val mainMediaAudioBufferDurationMs: Int,
     mediaMetricsMonitor: MediaMetricsMonitor?,
+    /** Lines that have to survive in the session log. See AndroidMediaSink.onMediaDiagnostic. */
+    private val diagnostic: (String) -> Unit = {},
 ) : Closeable {
     private data class AudioPacket(val rtp: ByteArray, val sample: Int)
 
@@ -741,6 +745,8 @@ private class AudioRenderer(
     private var playbackStarted = false
     private var prebufferBytes = 0
     private var startThresholdBytes = 0
+    /** Underruns seen so far on this track, to notice that the framework has disabled it. */
+    private var lastUnderrunCount = 0
     private var fadeApplied = false
     private var droppedPacketsLogged = false
     private var firstAacPayloadLogged = false
@@ -1127,6 +1133,7 @@ private class AudioRenderer(
         }
         var written = 0
         while (written < length && running) {
+            rearmPrebufferAfterUnderrun(track)
             val writeLength = if (playbackStarted) {
                 length - written
             } else {
@@ -1176,6 +1183,39 @@ private class AudioRenderer(
      * worse. Device logs showed single `decoder input unavailable ... dropped=1` events with
      * neither number recorded, which is exactly the ambiguity this line removes.
      */
+    /**
+     * Puts the track back into its prebuffering state after the framework has disabled it for
+     * underrunning.
+     *
+     * The first underrun is not what hurts; what follows it is. Android answers an underrun by
+     * disabling the track and releasing its buffer, so the reserve the stream started with is gone -
+     * and nothing rebuilds it, because the arrival rate sits on real time: the phone asks for
+     * `audioLatencyMs=80` on a call against 1000 on media, so a call is paced with almost no slack
+     * (`queue=0/64` in 18 of 20 windows of a measured call). Every later jitter spike then underruns
+     * an empty track, which is the cascade the log shows: a few underruns in the first seconds, then
+     * one every three seconds for the rest of the call, with `restartIfDisabled` fourteen times.
+     *
+     * Holding the audio back until [startThresholdBytes] are queued again is the one thing this side
+     * can do about it: it converts a recurring framework restart into one deliberate, bounded
+     * prebuffer. It cannot create audio the phone never sent - if the supply itself is short, this
+     * will show up as longer gaps, which is why the outcome is logged.
+     */
+    private fun rearmPrebufferAfterUnderrun(track: AudioTrack) {
+        val underruns = runCatching { track.underrunCount }.getOrDefault(lastUnderrunCount)
+        if (underruns <= lastUnderrunCount) return
+        lastUnderrunCount = underruns
+        if (!playbackStarted) return
+        playbackStarted = false
+        prebufferBytes = 0
+        runCatching { track.pause() }
+        val message =
+            "audio prebuffer re-armed type=${format.payloadType} " +
+                "audioType=${format.audioType} after underrun underruns=$underruns " +
+                "targetBytes=$startThresholdBytes"
+        Log.i(TAG, message)
+        diagnostic(message)
+    }
+
     private fun logAudioStats() {
         val track = track ?: return
         val now = System.nanoTime()
