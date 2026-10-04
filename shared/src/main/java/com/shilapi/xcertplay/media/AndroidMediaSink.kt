@@ -193,6 +193,7 @@ class AndroidMediaSink(
             advancedAudioChannelMapping,
             mainMediaAudioBufferDurationMs,
             mediaMetricsMonitor,
+            diagnostic = { message -> mediaDiagnostic?.invoke(message) },
         ).also { audioRenderers[id] = it }
     }
 }
@@ -729,6 +730,8 @@ private class AudioRenderer(
     private val advancedAudioChannelMapping: Boolean,
     private val mainMediaAudioBufferDurationMs: Int,
     mediaMetricsMonitor: MediaMetricsMonitor?,
+    /** Lines that have to survive in the session log. See AndroidMediaSink.onMediaDiagnostic. */
+    private val diagnostic: (String) -> Unit = {},
 ) : Closeable {
     private data class AudioPacket(val rtp: ByteArray, val sample: Int)
 
@@ -741,6 +744,24 @@ private class AudioRenderer(
     private var playbackStarted = false
     private var prebufferBytes = 0
     private var startThresholdBytes = 0
+
+    /**
+     * RTP sequence gaps: packets the phone sent that never arrived.
+     *
+     * An underrun and a loss sound identical from the driver's seat, and the counters next to them
+     * cannot tell them apart - `bufferedMs` falling to zero looks the same whether the audio was lost
+     * on the way or arrived too late to be useful. This is the measurement that separates them, and it
+     * is the one a peer project used to name the cause of the same symptom on Wi-Fi Direct
+     * (DiPlay #131: `seqForwardGaps`/`seqGapEvents`; #74's stutter diagnostics): lost audio cannot be
+     * buffered back, so a buffer-shaped fix can only trade stutter for latency.
+     *
+     * Our own drops are logged separately (`audio queue full`), so a gap counted here belongs to the
+     * link and not to this process.
+     */
+    private val sequenceTracker = RtpSequenceTracker()
+    private var sequenceGapEventsAtStats = 0
+    private var sequenceGapPacketsAtStats = 0
+    private var sequenceGapLoggedForWindow = false
     private var fadeApplied = false
     private var droppedPacketsLogged = false
     private var firstAacPayloadLogged = false
@@ -785,12 +806,38 @@ private class AudioRenderer(
     }
 
     fun submit(rtp: ByteArray, sample: Int) {
+        noteRtpSequence(rtp)
         if (!started || !queue.offer(AudioPacket(rtp, sample))) {
             if (started && !droppedPacketsLogged) {
                 droppedPacketsLogged = true
                 Log.w(TAG, "audio queue full; dropping newest packets to bound latency")
             }
         }
+    }
+
+    /**
+     * Counts what the sequence number says: an advance of one is the stream arriving in order, and an
+     * advance of more than one is that many packets minus one that never made it.
+     *
+     * The first gap of every stats window is also logged on the spot, with the queue and the track's
+     * depth at that instant, because which of the two came first inside a window is the whole question
+     * and a five-second summary cannot answer it.
+     */
+    private fun noteRtpSequence(rtp: ByteArray) {
+        if (rtp.size < 4) return
+        val sequence = ((rtp[2].toInt() and 0xff) shl 8) or (rtp[3].toInt() and 0xff)
+        // The arithmetic, including the wrap-around, lives in RtpSequenceTracker so it can be tested.
+        val gap = sequenceTracker.onPacket(sequence) ?: return
+        if (sequenceGapLoggedForWindow) return
+        sequenceGapLoggedForWindow = true
+        val message =
+            "audio sequence gap type=${format.payloadType} audioType=${format.audioType} " +
+                "lost=${gap.lost} sequence=${gap.previous}->${gap.current} " +
+                "queue=${queue.size}/$MAX_QUEUED_PACKETS " +
+                "depthMs=${track?.let { bufferedMs(it) } ?: -1L} " +
+                "underruns=${track?.let { runCatching { it.underrunCount }.getOrDefault(0) } ?: 0}"
+        Log.i(TAG, message)
+        diagnostic(message)
     }
 
     fun setMediaMetricsMonitor(monitor: MediaMetricsMonitor?) {
@@ -1176,22 +1223,32 @@ private class AudioRenderer(
      * worse. Device logs showed single `decoder input unavailable ... dropped=1` events with
      * neither number recorded, which is exactly the ambiguity this line removes.
      */
+    /** Milliseconds of decoded audio sitting in the track, awaiting the speaker. */
+    private fun bufferedMs(track: AudioTrack): Long {
+        if (trackBytesPerFrame <= 0 || format.sampleRate <= 0) return 0L
+        val framesWritten = totalBytesWritten / trackBytesPerFrame
+        val bufferedFrames = (framesWritten - playbackHeadFrames(track)).coerceAtLeast(0L)
+        return bufferedFrames * 1000L / format.sampleRate
+    }
+
     private fun logAudioStats() {
         val track = track ?: return
         val now = System.nanoTime()
         if (now - audioStatsStartNs < AUDIO_STATS_INTERVAL_NS) return
         val seconds = (now - audioStatsStartNs).toDouble() / NANOS_PER_SECOND
         val underruns = track.underrunCount
-        val framesWritten =
-            if (trackBytesPerFrame > 0) totalBytesWritten / trackBytesPerFrame else 0L
-        val bufferedFrames = (framesWritten - playbackHeadFrames(track)).coerceAtLeast(0L)
-        val bufferedMs =
-            if (format.sampleRate > 0) bufferedFrames * 1000L / format.sampleRate else 0L
+        val bufferedMs = bufferedMs(track)
+        val gapEvents = sequenceTracker.gapEvents
+        val gapPackets = sequenceTracker.gapPackets
+        val gapMax = sequenceTracker.gapMax
         Log.i(
             TAG,
             "audio stats type=${format.payloadType} codec=${format.codec} " +
                 "packets=${(audioStatsPackets / seconds).toInt()}/s " +
                 "underruns=${underruns - audioStatsUnderruns}(+$underruns) bufferedMs=$bufferedMs " +
+                "seqGapEvents=${gapEvents - sequenceGapEventsAtStats}(+$gapEvents) " +
+                "seqGapPackets=${gapPackets - sequenceGapPacketsAtStats}(+$gapPackets) " +
+                "seqGapMax=$gapMax " +
                 "queue=${queue.size}/$MAX_QUEUED_PACKETS " +
                 "codecDropped=${inputDropped - audioStatsDropped}(+$inputDropped) " +
                 "playing=$playbackStarted",
@@ -1200,6 +1257,9 @@ private class AudioRenderer(
         audioStatsPackets = 0
         audioStatsUnderruns = underruns
         audioStatsDropped = inputDropped
+        sequenceGapEventsAtStats = gapEvents
+        sequenceGapPacketsAtStats = gapPackets
+        sequenceGapLoggedForWindow = false
     }
 
     /** Unwraps the 32-bit play head, which the platform lets wrap roughly every 24 hours. */
