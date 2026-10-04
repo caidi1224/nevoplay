@@ -1726,10 +1726,13 @@ class CarPlayController(
             HOTSPOT_START_TIMEOUT_MILLIS
         }
         return try {
-            manager.start(timeoutMillis).also { live.info = it }
+            // `live.manager`, not `manager`: the raw object is wrapped before it is stored, and starting
+            // the raw one leaves the wrapper's work undone. That is exactly what happened - the radio
+            // lock was never taken, and the missing log line is what showed it.
+            live.manager.start(timeoutMillis).also { live.info = it }
         } catch (failure: Exception) {
             synchronized(hotspotLock) { if (hotspot === live) hotspot = null }
-            closeBestEffort(hotspotMode.name) { manager.close() }
+            closeBestEffort(hotspotMode.name) { live.manager.close() }
             if (isStaleWirelessRun(generation)) throw failure
             throw IOException(
                 "Could not establish ${hotspotMode.name} hotspot: " +
