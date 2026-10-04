@@ -43,8 +43,10 @@ import com.shilapi.xcertplay.mfi.MfiAuthenticator
 import com.shilapi.xcertplay.mfi.RemoteMfiAuthenticationClient
 import com.shilapi.xcertplay.network.CarPlayBonjour
 import com.shilapi.xcertplay.network.CarPlayVpnService
+import com.shilapi.xcertplay.network.LowLatencyHotspotManager
 import com.shilapi.xcertplay.network.LocalOnlyHotspotManager
 import com.shilapi.xcertplay.network.ManualHotspotManager
+import com.shilapi.xcertplay.network.WifiLowLatencyLock
 import com.shilapi.xcertplay.network.WifiP2pGroupManager
 import com.shilapi.xcertplay.network.WirelessHotspotInfo
 import com.shilapi.xcertplay.network.WirelessHotspotManager
@@ -1708,7 +1710,15 @@ class CarPlayController(
                 security = config.manualHotspotSecurity,
             )
         }
-        val live = LiveWirelessHotspot(signature, manager)
+        // The lock lives with the group: see LowLatencyHotspotManager for the measurement behind it.
+        val live = LiveWirelessHotspot(
+            signature,
+            LowLatencyHotspotManager(
+                delegate = manager,
+                lock = WifiLowLatencyLock(appContext),
+                log = { message -> debugLog(message) },
+            ),
+        )
         synchronized(hotspotLock) { hotspot = live }
         val timeoutMillis = if (hotspotMode == WirelessHotspotMode.WIFI_P2P) {
             WIFI_P2P_START_TIMEOUT_MILLIS
