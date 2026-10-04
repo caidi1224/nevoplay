@@ -178,8 +178,13 @@ class WifiP2pGroupManager(
         if (removeGroup && activeChannel != null) {
             removeGroupBlocking(activeChannel)
         }
-        activeThread?.quitSafely()
+        // Closed before the thread is told to quit, because Channel.close() is delivered through the
+        // channel's own AsyncChannel: quitting first turns the disconnect into a message to a dead
+        // thread, which the framework logs and then drops. A measured 2.3 hours produced 34 of those
+        // warnings beside 57 lines of the "createGroup is refused while no group exists" wedge - the
+        // shape a Wi-Fi service left believing in an old channel would produce.
         releaseChannel(activeChannel)
+        activeThread?.quitSafely()
     }
 
     private fun createChannelListener(
@@ -563,8 +568,8 @@ class WifiP2pGroupManager(
         if (removeGroup && failedChannel != null) {
             removeGroupBlocking(failedChannel)
         }
-        failedThread?.quitSafely()
         releaseChannel(failedChannel)
+        failedThread?.quitSafely()
     }
 
     /**
