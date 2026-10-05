@@ -195,7 +195,7 @@ verified change and for the tests CI owns - not for finding out whether the code
 compiles.
 
 ```bash
-source ~/.dsh/xcertplay-signing.env     # fork key, so the APK is installable
+source ~/.dsh/nevoplay-signing.env        # fork key, so the APK is installable
 ./gradlew clean verifyAutomotive        # unit tests + lint + automotive debug APK
 ./gradlew clean verifyMobile            # the same chain for the mobile app
 ```
@@ -261,13 +261,13 @@ uses, and the debug variant uses it too when it is present - so a local APK can
 be installed over one built by CI, with no uninstall first:
 
 ```bash
-source ~/.dsh/xcertplay-signing.env   # exports ANDROID_KEYSTORE_* (600, outside the repo)
+source ~/.dsh/nevoplay-signing.env     # exports ANDROID_KEYSTORE_* (600, outside the repo)
 ./gradlew :mobile:assembleDebug       # signed with the fork key
 ```
 
 The keystore and that file live outside the repository and must never be
 committed. Losing the keystore means a new signing identity and one uninstall
-on every head unit, so keep a backup of `~/.dsh/xcertplay-fork.jks` and its
+on every head unit, so keep a backup of `~/.dsh/nevoplay-fork.jks` and its
 password. The current certificate fingerprint is
 `744abb7537cac9237ed7566010d920527be90921d899fdea0f32f0b9d185405e`.
 
@@ -326,7 +326,7 @@ and the bar-state logging in this fork came to exist.
 - 每个构建还带 `BuildConfig.BUILD_ID`（提交号 `[+run<CI运行号>]`）：写在会话日志**首行**，也显示在 设置 → 诊断 里——这是判断“车上装的是哪一版、日志出自哪一版”的依据。
 - **推送前必须先本地编译验证**（JDK 25 与 Android SDK 已装好，见上文），并且**每次验证/出包都用同一条命令先 clean**：车机版 `./gradlew clean verifyAutomotive`，手机版 `./gradlew clean verifyMobile`（任务是 `:shared` 单测 + 三个模块 lint + 出包；**clean 必须写在命令行第一位**，那是 Gradle 唯一保证的先后关系——clean 与构建写同一批目录，用任务级 `mustRunAfter` 只压住一部分任务会输给资源与签名任务；增量构建的陈旧产物由 `purgeStaleClassCopies` 自动兜底）。本机存在 `cert/` 时，出来的包会自动带上内置 MFi 证书，不需要再记 `-P` 参数。这个项目的增量产物会陈旧（构建中途失败会留下 `名字 2.class` 这类编号副本），代价是下一次不相关的构建报重复类（`FooKt 2.class`、`D8: Type ... is defined multiple times`、`... already exists, it cannot be overwritten by SerializableChange`）。clean 只花几秒，能从根上避开这一类失败；根项目还注册了 `purgeStaleClassCopies`，在每个模块 `preBuild` 前删掉这些编号副本，但那是第二道防线，不是第一道。CI 只负责单元测试与留档产物，不用来“发现编译不过”。
 - **撤销已推送的改动**：单个提交用 `git revert <sha>`；但**连续 revert 多个提交通常会冲突**，因为每个提交都改了 `libs.versions.toml`。要退回旧状态就用 `git checkout <旧提交> -- <文件>` 恢复文件后向前提交，并且**仍要使用一个全新的版本号**（已构建过的值不能复用：退回 1.3.1.20 的界面是以 1.3.1.35 发布的）。动手前先 `git tag -f before-<改动> HEAD` 留个后路。
-- **签名密钥**：本机 `~/.dsh/xcertplay-fork.jks`（600）+ `~/.dsh/xcertplay-signing.env`；GitHub secrets 里的副本**读不回来**，密钥丢了只能轮换，代价是每台车卸载重装一次。当前证书指纹 `744abb75…85405e`。
+- **签名密钥**：本机 `~/.dsh/nevoplay-fork.jks`（600）+ `~/.dsh/nevoplay-signing.env`；GitHub secrets 里的副本**读不回来**，密钥丢了只能轮换，代价是每台车卸载重装一次。当前证书指纹 `744abb75…85405e`。
 - **CI 工作流**：`.github/workflows/fork-debug-apks.yml`（产物 `fork-debug-apks`），`workflow_dispatch` 已存在，**不要再加一次** —— 重复键会让 GitHub 直接拒绝整个工作流，且那次运行没有日志可看。
 - 应用显示名为 **NEVOPlay**，application ID 为 `com.edd1e.nevoplay`；本地目录仍叫 `xcertplay`，个人 GitHub 仓库已改名为 `nevoplay`；upstream 仍叫 `xcertplay`。
 - **车机上没有 adb，也不要让人去连**：任何诊断都不能依赖它——不用 `dumpsys`，不用主机侧 `logcat`，不读 app 够不到的 `/vendor/etc`。设备侧的问题只能靠上面那份日志、靠 app 能观察到的自身状态、或靠驾驶员能看到/听到的东西来回答。缺观测项就往 app 里加一行，而不是去找主机工具。
