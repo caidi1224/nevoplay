@@ -47,6 +47,7 @@ import com.shilapi.xcertplay.network.LowLatencyHotspotManager
 import com.shilapi.xcertplay.network.LocalOnlyHotspotManager
 import com.shilapi.xcertplay.network.ManualHotspotManager
 import com.shilapi.xcertplay.network.WifiLowLatencyLock
+import com.shilapi.xcertplay.network.WifiScanProbe
 import com.shilapi.xcertplay.network.WifiP2pGroupManager
 import com.shilapi.xcertplay.network.WirelessHotspotInfo
 import com.shilapi.xcertplay.network.WirelessHotspotManager
@@ -181,6 +182,7 @@ class CarPlayController(
     private val touchExecutor: ExecutorService = Executors.newSingleThreadExecutor()
     private val tunnelExecutor: ExecutorService = Executors.newSingleThreadExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
+    private val scanProbe by lazy { WifiScanProbe(appContext) }
     private val hostId = UUID.randomUUID().toString().uppercase(Locale.US)
     private val systemBuid = UUID.randomUUID().toString().uppercase(Locale.US)
     private val lifecycleLock = Any()
@@ -363,6 +365,7 @@ class CarPlayController(
         }
         CarPlayMediaSessionBridge.attach(appContext, this, ::sendMediaRemoteCommand)
         mainHandler.postDelayed(stageWatchdog, STAGE_STALL_WATCH_INTERVAL_MILLIS)
+        mainHandler.postDelayed(scanProbeTicker, SCAN_PROBE_INTERVAL_MILLIS)
         if (config.transport == CarPlayTransport.WIRED) {
             permissionCloseable = iphoneHost.registerPermissionReceiver(::onIphonePermission)
             attachCloseable = iphoneHost.registerAttachReceiver(::onIphoneAttached)
@@ -500,6 +503,7 @@ class CarPlayController(
             closed = true
         }
         mainHandler.removeCallbacks(stageWatchdog)
+        mainHandler.removeCallbacks(scanProbeTicker)
         closeReceivers()
         stopFileTransferReceivers()
         availabilityPollGeneration.incrementAndGet()
@@ -2199,6 +2203,25 @@ class CarPlayController(
         }
     }
 
+    /**
+     * Reports what the radio is doing besides CarPlay while a group is up.
+     *
+     * The stutter this fork has been chasing is attributed by a peer project to periodic full-band
+     * scans taking a single shared radio off the CarPlay channel, and to the station interface being
+     * unjoined being what makes the firmware scan that often (DiPlay #225). Both halves of that are
+     * readable from inside the app - see WifiScanProbe - and they have to be read next to the audio
+     * stats: the whole question is whether the sequence gaps line up with the scans.
+     */
+    private val scanProbeTicker = object : Runnable {
+        override fun run() {
+            if (closed) return
+            if (config.transport == CarPlayTransport.WIRELESS && hotspot != null) {
+                runCatching { debugLog(scanProbe.line(SCAN_PROBE_WINDOW_MILLIS)) }
+            }
+            mainHandler.postDelayed(this, SCAN_PROBE_INTERVAL_MILLIS)
+        }
+    }
+
     private fun CarPlayStatus.debugLogMessage(): String = when (this) {
         CarPlayStatus.DiscoveringMfi ->
             "STEP mfi/start: preparing the configured MFi authentication provider"
@@ -2283,6 +2306,10 @@ class CarPlayController(
 
         /** How long a stage has to hold before saying so, and between repeats. */
         private const val STAGE_STALL_REPORT_MILLIS = 30_000L
+
+        /** How often the scan probe reports, and how far back it looks for scans. */
+        private const val SCAN_PROBE_INTERVAL_MILLIS = 10_000L
+        private const val SCAN_PROBE_WINDOW_MILLIS = 60_000L
         private const val PERMISSION_POLL_TIMEOUT_MILLIS = 120_000L
         private const val DEVICE_AVAILABILITY_POLL_INTERVAL_MILLIS = 2_000L
         private const val WIRELESS_HANDOFF_TIMEOUT_MILLIS = 45_000L
