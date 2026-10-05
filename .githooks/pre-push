@@ -7,7 +7,7 @@ remote_url="$2"
 case "$remote_name $remote_url" in
   *shilapi/xcertplay*)
     echo "pre-push: BLOCKED -> '$remote_name' resolves to $remote_url" >&2
-    echo "pre-push: this repository is a personal fork (origin = caidi1224/xcertplay)." >&2
+    echo "pre-push: this repository is a personal fork (origin = caidi1224/nevoplay)." >&2
     echo "pre-push: pushing to shilapi/xcertplay is not allowed; push to 'origin' instead." >&2
     exit 1
     ;;

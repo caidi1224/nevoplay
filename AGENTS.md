@@ -7,7 +7,7 @@ before editing; it overrides generic defaults. User-facing docs live in
 ## Repository scope (mandatory)
 
 This checkout is a **personal fork**. Everything stays in the owner's own
-repositories — `origin` = `github.com/caidi1224/xcertplay` — and on this
+repositories — `origin` = `github.com/caidi1224/nevoplay` — and on this
 machine.
 
 **Never publish to `github.com/shilapi/xcertplay`.** That project is read-only
@@ -152,8 +152,8 @@ re-sync the base whenever upstream is merged (a merge to `1.3.2` restarts at
 Both numbers live in one place, `gradle/libs.versions.toml`:
 
 ```toml
-nevoPlayVersionName = "1.3.2.55"   # <upstream>.<n>
-nevoPlayVersionCode = "130255"     # <1302> * 100 + n, always increasing
+nevoPlayVersionName = "1.3.2.56"   # <upstream>.<n>
+nevoPlayVersionCode = "130256"     # <1302> * 100 + n, always increasing
 ```
 
 `mobile` and `automotive` read them from the version catalog, so the two
@@ -317,18 +317,18 @@ and the bar-state logging in this fork came to exist.
 
 ## 中文摘要
 
-- **本仓库只属于你自己的 fork 与本地**：`origin` = `github.com/caidi1224/xcertplay`。**禁止向 `github.com/shilapi/xcertplay` 推送**，也不要向它提 PR（除非你在对话里明确要求）。upstream 只能 fetch 用于同步更新。
+- **本仓库只属于你自己的 fork 与本地**：`origin` = `github.com/caidi1224/nevoplay`。**禁止向 `github.com/shilapi/xcertplay` 推送**，也不要向它提 PR（除非你在对话里明确要求）。upstream 只能 fetch 用于同步更新。
 - 三重保障不要拆掉：GitHub 侧你没有 upstream 的写权限（403）；本仓库里 `upstream` 的 **push URL 已被禁用**（`DISABLED://never-push-to-upstream`），fetch 仍正常；版本化的 `.githooks/pre-push` 会拦下任何目标里含 `shilapi/xcertplay` 的推送。新克隆后需执行一次 `git config core.hooksPath .githooks` 启用钩子。
 - **所有更新都必须单独提交一个 commit**，一个逻辑改动一个 commit，交付时不留未提交的改动，确保任何一处改动都能单独回滚。
 - 已推送的历史（尤其 `master`）**不得强推、amend、rebase**；要撤销已推送的改动请用 `git revert <sha>` 生成一个新的可回滚 commit。只有尚未推送的本地 commit 才可以用 `git reset --hard HEAD~1`。
 - 提交信息沿用现有风格：`feat:`、`fix(scope):`、`opti:`、`chore:`、`update README.md`，版本号提交直接写 `1.3.0`。
-- **每交付一个改动，版本号末尾的小版本号 +1**（`1.3.2.54` → `1.3.2.55` → `1.3.2.56`…），不重复使用已经构建过的值；合并上游后以新的三段版本为基准重新从 `.1` 开始。两个数字集中在 `gradle/libs.versions.toml`（`nevoPlayVersionName` / `nevoPlayVersionCode`），mobile 与 automotive 都从那里读取，不会各写一份。
+- **每交付一个改动，版本号末尾的小版本号 +1**（`1.3.2.55` → `1.3.2.56` → `1.3.2.57`…），不重复使用已经构建过的值；合并上游后以新的三段版本为基准重新从 `.1` 开始。两个数字集中在 `gradle/libs.versions.toml`（`nevoPlayVersionName` / `nevoPlayVersionCode`），mobile 与 automotive 都从那里读取，不会各写一份。
 - 每个构建还带 `BuildConfig.BUILD_ID`（提交号 `[+run<CI运行号>]`）：写在会话日志**首行**，也显示在 设置 → 诊断 里——这是判断“车上装的是哪一版、日志出自哪一版”的依据。
 - **推送前必须先本地编译验证**（JDK 25 与 Android SDK 已装好，见上文），并且**每次验证/出包都用同一条命令先 clean**：车机版 `./gradlew clean verifyAutomotive`，手机版 `./gradlew clean verifyMobile`（任务是 `:shared` 单测 + 三个模块 lint + 出包；**clean 必须写在命令行第一位**，那是 Gradle 唯一保证的先后关系——clean 与构建写同一批目录，用任务级 `mustRunAfter` 只压住一部分任务会输给资源与签名任务；增量构建的陈旧产物由 `purgeStaleClassCopies` 自动兜底）。本机存在 `cert/` 时，出来的包会自动带上内置 MFi 证书，不需要再记 `-P` 参数。这个项目的增量产物会陈旧（构建中途失败会留下 `名字 2.class` 这类编号副本），代价是下一次不相关的构建报重复类（`FooKt 2.class`、`D8: Type ... is defined multiple times`、`... already exists, it cannot be overwritten by SerializableChange`）。clean 只花几秒，能从根上避开这一类失败；根项目还注册了 `purgeStaleClassCopies`，在每个模块 `preBuild` 前删掉这些编号副本，但那是第二道防线，不是第一道。CI 只负责单元测试与留档产物，不用来“发现编译不过”。
 - **撤销已推送的改动**：单个提交用 `git revert <sha>`；但**连续 revert 多个提交通常会冲突**，因为每个提交都改了 `libs.versions.toml`。要退回旧状态就用 `git checkout <旧提交> -- <文件>` 恢复文件后向前提交，并且**仍要使用一个全新的版本号**（已构建过的值不能复用：退回 1.3.1.20 的界面是以 1.3.1.35 发布的）。动手前先 `git tag -f before-<改动> HEAD` 留个后路。
 - **签名密钥**：本机 `~/.dsh/xcertplay-fork.jks`（600）+ `~/.dsh/xcertplay-signing.env`；GitHub secrets 里的副本**读不回来**，密钥丢了只能轮换，代价是每台车卸载重装一次。当前证书指纹 `744abb75…85405e`。
 - **CI 工作流**：`.github/workflows/fork-debug-apks.yml`（产物 `fork-debug-apks`），`workflow_dispatch` 已存在，**不要再加一次** —— 重复键会让 GitHub 直接拒绝整个工作流，且那次运行没有日志可看。
-- 应用显示名为 **NEVOPlay**，application ID 为 `com.edd1e.nevoplay`；项目目录和个人 fork 的 GitHub 仓库仍叫 `xcertplay`，upstream 的引用也保留原名。
+- 应用显示名为 **NEVOPlay**，application ID 为 `com.edd1e.nevoplay`；本地目录仍叫 `xcertplay`，个人 GitHub 仓库已改名为 `nevoplay`；upstream 仍叫 `xcertplay`。
 - **车机上没有 adb，也不要让人去连**：任何诊断都不能依赖它——不用 `dumpsys`，不用主机侧 `logcat`，不读 app 够不到的 `/vendor/etc`。设备侧的问题只能靠上面那份日志、靠 app 能观察到的自身状态、或靠驾驶员能看到/听到的东西来回答。缺观测项就往 app 里加一行，而不是去找主机工具。
 - 提交前先看 `git status`：不要提交 `build/`、APK、keystore、`local.properties`、日志等生成物或本地状态。
 - **证书与签名材料永远不进历史**：MFi 材料（`cert/`）、任何 `.p7b`/`.pk8`/`.jks`/`.keystore`/`.p12`、`*.signing.env`，以及内嵌这些材料的产物（`apk/`、`*.apk`、`*.aab`——debug 包里有 `assets/mfi/mfi.p7b` 和 `mfi.pk8`，所以成品包同样算秘密材料）由三层挡住——`.gitignore` 规则、版本化的 `.githooks/pre-commit`（它检查暂存区，所以 `git add -f` 也绕不过）、以及 CI 里的复查。`cert/` 只存在于本机工作副本，构建从那里读取（见上文验证命令）。万一有秘密进了提交，按已泄露处理并轮换：事后再删文件并不会把它从历史里移除。
