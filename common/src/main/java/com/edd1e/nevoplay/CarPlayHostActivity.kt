@@ -4321,7 +4321,19 @@ class CarPlayHostActivity : ComponentActivity() {
         if (!menuOpen && controllerGeneration == restartGeneration) {
             updateHotspotStatus(status)
             val description = status.describe()
-            setConnectionStage(withHotspotNotice(description))
+            // A phone that is simply not here is not an error to shout about: the group the
+            // iPhone knows is still up, so the banner says what is happening and the retry keeps
+            // running quietly. The raw text still goes to the log through reconnectAfterLoss.
+            val phoneAway = status is CarPlayStatus.Failed &&
+                wirelessEnabled &&
+                keepsHotspotAcrossRebuild(description)
+            setConnectionStage(
+                if (phoneAway) {
+                    "Waiting for the iPhone - it reconnects on its own when it is back"
+                } else {
+                    withHotspotNotice(description)
+                },
+            )
             when (status) {
                 is CarPlayStatus.Failed -> reconnectAfterLoss(description)
                 else -> Unit
