@@ -1,182 +1,113 @@
 <div align="center">
-  <img src="shared/src/main/res/drawable-nodpi/nevoplay_launcher.png" width="180" height="180" alt="NEVOPlay icon" />
-<h1><strong><font size="6">NEVOPlay</font></strong></h1>
-  <a href="README.md">English</a> | <a href="README.zh-CN.md">中文</a>
-  <p>An Android head-unit CarPlay receiver. It supports connecting to the MFi chip through a CH341 I2C bridge or directly through the board's I2C controller, and supports both wired and wireless CarPlay connections.</p>
+  <img src="shared/src/main/res/drawable-nodpi/nevoplay_launcher.png" width="160" height="160" alt="NEVOPlay app icon" />
+  <h1>NEVOPlay</h1>
+  <p><strong>A vehicle-focused CarPlay receiver for the Changan Qiyuan A07.</strong></p>
+  <p><a href="README.md">English</a> · <a href="README.zh-CN.md">简体中文</a></p>
 </div>
 
-> [!WARNING]
-> **This repository is a personal fork, tuned for one car. Do not treat it as a release.**
->
-> Everything here was changed to make CarPlay work on a single head unit — a **Changan Qiyuan A07**
-> running 启源OS 2.2 (Android 11), with a CH341 MFi bridge, a 2560×1600 panel and Wi-Fi P2P for
-> wireless CarPlay. That unit's behaviour is baked into the code: how it forces its own status bar,
-> how it resizes the window, how it names its P2P and hotspot interfaces, and how its MFi
-> coprocessor answers (or does not). None of it is verified anywhere else.
->
-> **Do not install this unless you understand the risk.** It can leave you with a head unit that
-> shows no picture, will not connect, or needs a reinstall to recover, and there is no support
-> channel for it. Do not disable protections you do not understand — MFi authentication, the
-> credential guard, or the system-bar handling.
->
-> If you want a CarPlay receiver for your own car, use the upstream project instead:
-> **<https://github.com/shilapi/xcertplay>**. This fork exists so its owner can iterate on one
-> vehicle; it is not a replacement for it. See [AGENTS.md](AGENTS.md) for how this fork is run.
+NEVOPlay connects an iPhone to an Android-based head unit and renders the
+CarPlay experience on the vehicle display. This codebase concentrates on the
+hardware and system behavior of the Qiyuan A07; it is an enthusiast project,
+not software published or supported by Changan.
 
-## Features
+## The target vehicle
 
-- CarPlay host applications for Android and Android Automotive OS.
-- Support for MFI chips connected through a CH341 bridge or native
-  `/dev/i2c-N` devices, local certificate/private-key files, and Remote MFI
-  authentication (see the API below).
-- Wired and wireless CarPlay connections.
-- CarPlay Ultra triggering (the protocol stack is untested/incomplete, but it
-  can trigger the CarPlay Ultra prompt on an iPhone).
-- Voice, navigation, and music multi-channel audio output mapped to the
-  corresponding Android channels.
-- Dynamic Activity resizing with automatic re-handshaking to the new
-  resolution.
-- Vehicle head-unit location reporting.
-- Android 9 (API 28) support.
+The current integration reference is a Qiyuan A07 running QiyuanOS 2.2
+(Android 11), with a 2560 × 1600 display, a CH341-based MFi bridge and Wi-Fi
+P2P for wireless sessions. Other model years, trims, system images and adapter
+boards have not been established as compatible. Treat installation on other
+hardware as an experiment and keep a recovery path for the head unit.
 
-## Usage
+## What the app brings together
 
-1. Pair your iPhone with the head unit via Bluetooth.
-2. Before a CarPlay video stream starts, tap the Settings button in the lower-left corner. You can also tap twice in a row with three fingers to open Settings on the CarPlay screen.
-3. Make sure all the settings are configured as desired.
-   To enable another entry gesture, turn on `More gestures to Settings page`. Start with one finger in the upper quarter of the left eighth of the screen, slide down along that strip, and lift in the lower quarter.
-4. Scroll to the bottom and select `Save & Reconnect`.
-5. Connect your MFi chip using the method you selected.
-6. Wait for the connection to complete, then enjoy.
+- Two Android hosts: a standard Android app and an Android Automotive OS app.
+- Wired and Wi-Fi P2P CarPlay session paths.
+- MFi authentication through a CH341 I²C bridge, a board-provided I²C device,
+  or a configured remote authentication service.
+- Vehicle-side audio routing for media, navigation and voice, plus optional
+  location reporting to the connected phone.
+- A diagnostics screen and session log to make on-device behavior inspectable
+  without depending on a shell on the head unit.
 
-## Current progress
+The implementation is split into `mobile/` and `automotive/` app targets,
+`common/` for their shared interface, and `shared/` for the CarPlay, iAP2,
+transport, MFi and media code.
 
-It works 👍. It has been tested on car head units and phones. If you encounter
-an incompatible car head unit, please open an issue and attach your log from
-`/sdcard/Download/nevoplay/nevoplay.log` (Settings shows the exact path; on
-Android 9 it falls back to
-`/sdcard/Android/data/com.edd1e.nevoplay/files/logs/nevoplay.log`).
+## Set up a head unit
 
-Adapter board: [CH341-to-MFI](https://github.com/shilapi/ch341-to-mfi-chip)
+Install the APK that matches the device, pair the iPhone with the head unit over
+Bluetooth, and open NEVOPlay settings before starting a CarPlay session. Select
+the connection and MFi authentication methods available in your installation,
+save the settings, then reconnect. Exact behavior depends on the vehicle image
+and attached hardware; a successful build alone does not confirm compatibility.
 
-## Local MFI files
+### MFi credentials
 
-Choose `Local files` under `MFI certificate & signing target`, then use the two
-`Choose` buttons to select the certificate and private key with Android's system
-document picker. The supported formats are a DER PKCS#7 certificate (`.p7b`)
-and its matching, unencrypted DER PKCS#8 private key (`.pk8`). The app validates
-that the files match before starting the phone connection and reloads them on
-MFI reconnect.
+The app can use a certificate and its matching private key selected with the
+Android document picker. On head units without a picker, it looks for files
+named `mfi.p7b` and `mfi.pk8` in either location:
 
-Store the private key in a protected location. Neither file is copied into app
-preferences; only Android's persistent read permission and document URI are
-saved.
+- `/sdcard/Download/nevoplay/`
+- `/sdcard/Android/data/com.edd1e.nevoplay/files/mfi/`
 
-### Head units without a file picker
+The first location may be restricted by the Android storage policy; the app's
+own data directory is hidden from many file managers on Android 11 and later.
+Use the vehicle's supported file-transfer or file-management method. The app
+stores document access, not copies of picker-selected credentials.
 
-Many panels have no document provider at all, so the picker has nothing to
-launch. The app then reads the pair from a fixed directory, with the files named
-exactly `mfi.p7b` and `mfi.pk8`:
+For deployments that need credentials packaged into an APK, Gradle accepts
+`nevoPlay.mfi.certificate` and `nevoPlay.mfi.privateKey` file properties (or
+the same keys in the local, git-ignored `local.properties`). An APK built this
+way contains the private key: limit access to the artifact and never commit or
+publish the credentials themselves.
 
-| Directory | Readable |
-| --- | --- |
-| `/sdcard/Download/nevoplay/` | Next to the session log, visible to file managers. Android gives one app access to documents another writer contributed only with storage access, so this may be refused on newer versions. |
-| `/sdcard/Android/data/com.edd1e.nevoplay/files/mfi/` | The app's own directory: no permission involved, readable on every Android version, hidden from file managers on Android 11+. |
+## Build and verify
 
-Both documents chosen through the picker win over the fixed directories; inside
-the fixed directories `Download/nevoplay` is tried before the app's own one. The
-`Local files` settings section names the files that will actually be read, and
-`Refresh files` re-checks after a push.
-
-### Certificate built into the app
-
-A panel that can read neither directory — no picker, and a storage policy that
-refuses both `/sdcard` locations — can carry the material inside the APK. The
-build only learns the two paths from its command line or from the gitignored
-`local.properties`, so the repository never references the material:
+The project uses JDK 25, Android SDK Platform 37 and Android NDK
+`28.2.13676358`. From the repository root, run the verification task for the
+target you need:
 
 ```bash
-./gradlew :automotive:assembleDebug \
-  -PnevoPlay.mfi.certificate=/abs/path/certificate.p7b \
-  -PnevoPlay.mfi.privateKey=/abs/path/identity.pk8
+./gradlew clean verifyAutomotive
 ```
-
-The two documents are copied to `assets/mfi/mfi.p7b` and `assets/mfi/mfi.pk8`
-and that source is read before the directories. A build without those properties
-is unchanged and carries no certificate. Anyone holding such an APK holds the
-private key, so it is not a build to hand around.
 
 ```bash
-adb push mfi.p7b /sdcard/Download/nevoplay/
-adb push mfi.pk8 /sdcard/Download/nevoplay/
+./gradlew clean verifyMobile
 ```
 
-## Project structure
+Each task runs the shared unit tests and module lint checks before assembling
+the selected debug APK. The outputs are written under
+`automotive/build/outputs/apk/debug/` and `mobile/build/outputs/apk/debug/`.
+Run each command separately; `clean` should lead the build invocation.
 
-| Path | Purpose |
-| --- | --- |
-| `common/` | Shared CarPlay host activity, settings UI, persistence, and app resources used by both targets. |
-| `mobile/` | Standard Android target using the shared CarPlay host UI. |
-| `automotive/` | Android Automotive OS target with the shared host UI and advanced audio channel mapping. |
-| `shared/` | Car App Library code plus the CH341, I2C, MFi, iPhone, iAP2, NCM, VPN, AirPlay, and media implementations. |
+Minimum Android version: Android 9 (API 28). Wired operation needs compatible
+USB Host or board-level I²C hardware; wireless operation depends on the
+head unit's Wi-Fi implementation. Hardware testing is required for either
+path.
 
-## Remote MFI
+## Diagnostics
 
-The Remote MFi client treats a remote service as an MFi chip for remote calls,
-or uses BAA authentication. Remote authentication avoids the process of
-connecting to a local MFi chip for authentication.
+Settings → Diagnostics shows the active log location and build identifier. The
+usual shared-storage path is:
 
-### Endpoints
-
-| Method | Path | Purpose | Request body | Success response | Failure response |
-| --- | --- | --- | --- | --- | --- |
-| `GET` | `/mfi/certificate` | Get the MFi chip version, certificate type, and certificate contents; cached by the client after the first call | None | Certificate JSON | `{"detail":"..."}` |
-| `POST` | `/mfi/sign` | Sign the challenge | `{"challenge":"...","requestId":"..."}` | `{"signature":"..."}` | `{"detail":"..."}` |
-| `POST` | `/mfi/reset` | Request a reset of the remote MFi chip | `{}` | `{"detail":""}` | `{"detail":"..."}` |
-
-(Optional) Standard Bearer Authentication can be used for verification.
-
-**Currently, only BAA Authentication has been tested.**
-
-## Requirements
-
-- JDK 17 or newer to launch Gradle. The daemon resolves Java 25 through the
-  Gradle toolchain.
-- Android SDK Platform 37.
-- Android 9 (API 28) or newer.
-  On Android 9, Wi-Fi P2P 5 GHz mode is unavailable and LocalOnlyHotspot is used instead.
-- Android NDK `28.2.13676358`.
-- A physical USB Host/OTG Android device and MFi hardware are required for
-  hardware validation.
-
-## Build
-
-On Windows PowerShell:
-
-```powershell
-$env:JAVA_HOME = "C:\Program Files\Android\Android Studio\jbr"
-.\gradlew.bat :shared:testDebugUnitTest :common:lintDebug :mobile:lintDebug :automotive:lintDebug :mobile:assembleDebug :automotive:assembleDebug
+```text
+/sdcard/Download/nevoplay/nevoplay.log
 ```
 
-On macOS or Linux:
+If Android does not allow that location, the app falls back to its private
+files directory:
+`/sdcard/Android/data/com.edd1e.nevoplay/files/logs/nevoplay.log`. Include the
+log and the displayed build identifier when reporting a problem; do not include
+MFi credentials.
 
-```bash
-./gradlew :shared:testDebugUnitTest :common:lintDebug :mobile:lintDebug :automotive:lintDebug :mobile:assembleDebug :automotive:assembleDebug
-```
+## Project origin and license
 
-Unsigned release APKs:
+NEVOPlay is a vehicle-specific adaptation built on the open-source
+[xcertplay project](https://github.com/shilapi/xcertplay). It is not affiliated
+with Changan or Apple. Source is distributed under the
+[GNU General Public License v3.0](LICENSE); consult the license and source
+notices when modifying or redistributing the project.
 
-```powershell
-.\gradlew.bat :mobile:assembleRelease :automotive:assembleRelease
-```
-
-## Acknowledgements
-
-Thanks to [LIVI](https://github.com/f-io/LIVI) for providing important
-reference for this project.
-Thanks to the [showcase](https://github.com/amineross/showcase) project for
-providing important reference for the BAA authentication in this project.
-
-## License
-
-Licensed under the [GNU General Public License v3.0](LICENSE).
+Parts of the implementation also draw on the [LIVI](https://github.com/f-io/LIVI)
+and [showcase](https://github.com/amineross/showcase) projects; see their
+respective repositories for their terms and notices.
