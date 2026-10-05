@@ -14,7 +14,7 @@ plugins {
  *
  *   File .../CarPlayBackgroundSession 2.class already exists, it cannot be overwritten by
  *   SerializableChange(...)                 (bundleLibRuntimeToDirDebug)
- *   D8: Type com.shilapi.xcertplay... is defined multiple times   (mergeLibDex)
+ *   D8: Type com.edd1e.nevoplay... is defined multiple times   (mergeLibDex)
  *
  * The documented cure - `clean`, or `:common:clean :mobile:clean` - throws away every incremental
  * output to get rid of a handful of stale files, and it has to be remembered each time. Deleting

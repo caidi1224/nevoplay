@@ -1,6 +1,6 @@
 <div align="center">
-  <img src="https://raw.githubusercontent.com/shilapi/xcertplay/refs/heads/master/asset/xcertplay_small.png" width="180" height="180" alt="xcertplay icon" />
-<h1><strong><font size="6">xcertplay</font></strong></h1>
+  <img src="shared/src/main/res/drawable-nodpi/nevoplay_launcher.png" width="180" height="180" alt="NEVOPlay icon" />
+<h1><strong><font size="6">NEVOPlay</font></strong></h1>
   <a href="README.md">English</a> | <a href="README.zh-CN.md">中文</a>
   <p>An Android head-unit CarPlay receiver. It supports connecting to the MFi chip through a CH341 I2C bridge or directly through the board's I2C controller, and supports both wired and wireless CarPlay connections.</p>
 </div>
@@ -53,9 +53,9 @@
 
 It works 👍. It has been tested on car head units and phones. If you encounter
 an incompatible car head unit, please open an issue and attach your log from
-`/sdcard/Download/xcertplay/xcertplay.log` (Settings shows the exact path; on
+`/sdcard/Download/nevoplay/nevoplay.log` (Settings shows the exact path; on
 Android 9 it falls back to
-`/sdcard/Android/data/com.shilapi.xcertplay/files/logs/xcertplay.log`).
+`/sdcard/Android/data/com.edd1e.nevoplay/files/logs/nevoplay.log`).
 
 Adapter board: [CH341-to-MFI](https://github.com/shilapi/ch341-to-mfi-chip)
 
@@ -80,11 +80,11 @@ exactly `mfi.p7b` and `mfi.pk8`:
 
 | Directory | Readable |
 | --- | --- |
-| `/sdcard/Download/xcertplay/` | Next to the session log, visible to file managers. Android gives one app access to documents another writer contributed only with storage access, so this may be refused on newer versions. |
-| `/sdcard/Android/data/com.shilapi.xcertplay/files/mfi/` | The app's own directory: no permission involved, readable on every Android version, hidden from file managers on Android 11+. |
+| `/sdcard/Download/nevoplay/` | Next to the session log, visible to file managers. Android gives one app access to documents another writer contributed only with storage access, so this may be refused on newer versions. |
+| `/sdcard/Android/data/com.edd1e.nevoplay/files/mfi/` | The app's own directory: no permission involved, readable on every Android version, hidden from file managers on Android 11+. |
 
 Both documents chosen through the picker win over the fixed directories; inside
-the fixed directories `Download/xcertplay` is tried before the app's own one. The
+the fixed directories `Download/nevoplay` is tried before the app's own one. The
 `Local files` settings section names the files that will actually be read, and
 `Refresh files` re-checks after a push.
 
@@ -97,8 +97,8 @@ build only learns the two paths from its command line or from the gitignored
 
 ```bash
 ./gradlew :automotive:assembleDebug \
-  -Pxcertplay.mfi.certificate=/abs/path/certificate.p7b \
-  -Pxcertplay.mfi.privateKey=/abs/path/identity.pk8
+  -PnevoPlay.mfi.certificate=/abs/path/certificate.p7b \
+  -PnevoPlay.mfi.privateKey=/abs/path/identity.pk8
 ```
 
 The two documents are copied to `assets/mfi/mfi.p7b` and `assets/mfi/mfi.pk8`
@@ -107,8 +107,8 @@ is unchanged and carries no certificate. Anyone holding such an APK holds the
 private key, so it is not a build to hand around.
 
 ```bash
-adb push mfi.p7b /sdcard/Download/xcertplay/
-adb push mfi.pk8 /sdcard/Download/xcertplay/
+adb push mfi.p7b /sdcard/Download/nevoplay/
+adb push mfi.pk8 /sdcard/Download/nevoplay/
 ```
 
 ## Project structure

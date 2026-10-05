@@ -193,8 +193,8 @@ jobs:
           "${apksigner}" verify --verbose --print-certs "${mobile_apk}"
           "${apksigner}" verify --verbose --print-certs "${automotive_apk}"
 
-          cp "${mobile_apk}" "release/xcertplay-mobile-${safe_tag}.apk"
-          cp "${automotive_apk}" "release/xcertplay-automotive-${safe_tag}.apk"
+          cp "${mobile_apk}" "release/NEVOPlay-mobile-${safe_tag}.apk"
+          cp "${automotive_apk}" "release/NEVOPlay-automotive-${safe_tag}.apk"
 
       - name: Upload APKs to the tag release
         env:

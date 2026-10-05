@@ -3,7 +3,7 @@
 
     <!-- The host is a fullscreen video surface: a black window background keeps the light theme
          from flashing through while the vehicle resizes or animates its system bars. -->
-    <style name="Theme.Xcertplay" parent="android:Theme.Material.Light.NoActionBar">
+    <style name="Theme.NEVOPlay" parent="android:Theme.Material.Light.NoActionBar">
         <item name="android:windowBackground">@android:color/black</item>
 
         <!-- Declared in the theme as well as applied at runtime: an OEM SystemUI such as 启源OS 2.2

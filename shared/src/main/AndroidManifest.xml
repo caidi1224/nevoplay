@@ -36,7 +36,7 @@
             android:value="1" />
 
         <service
-            android:name="com.shilapi.xcertplay.shared.MyCarAppService"
+            android:name="com.edd1e.nevoplay.shared.MyCarAppService"
             android:exported="true">
             <intent-filter>
                 <action android:name="androidx.car.app.CarAppService" />
@@ -46,12 +46,12 @@
         </service>
 
         <service
-            android:name="com.shilapi.xcertplay.network.CarPlayVpnService"
+            android:name="com.edd1e.nevoplay.network.CarPlayVpnService"
             android:permission="android.permission.BIND_VPN_SERVICE"
             android:exported="false" />
 
         <service
-            android:name="com.shilapi.xcertplay.media.CarPlayMediaSessionService"
+            android:name="com.edd1e.nevoplay.media.CarPlayMediaSessionService"
             android:exported="true"
             android:foregroundServiceType="mediaPlayback">
             <intent-filter>

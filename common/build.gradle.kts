@@ -12,7 +12,7 @@ plugins {
  * Declared here rather than as a top-level function because a top-level function in this script does
  * not inherit the `Project` receiver that `providers` needs.
  */
-fun Project.xcertplayBuildId(): String {
+fun Project.nevoPlayBuildId(): String {
     val commit = runCatching {
         providers.exec {
             commandLine("git", "rev-parse", "--short", "HEAD")
@@ -24,7 +24,7 @@ fun Project.xcertplayBuildId(): String {
 }
 
 /** Commit date of HEAD as `YYYY-MM-DD`, or `unknown` when there is no git checkout to read. */
-fun Project.xcertplayCommitDate(): String = runCatching {
+fun Project.nevoPlayCommitDate(): String = runCatching {
     providers.exec {
         commandLine("git", "log", "-1", "--format=%cd", "--date=format:%Y-%m-%d")
     }.standardOutput.asText.get().trim()
@@ -40,7 +40,7 @@ fun Project.xcertplayCommitDate(): String = runCatching {
  * that looks complete but cannot authenticate on the head unit - a failure that shows up in the car,
  * not in the build.
  */
-fun Project.xcertplayOptionalPath(key: String): String? {
+fun Project.nevoPlayOptionalPath(key: String): String? {
     (findProperty(key) as? String)?.takeIf { it.isNotBlank() }?.let { return it }
     val localProperties = rootProject.file("local.properties")
     if (localProperties.isFile) {
@@ -93,9 +93,9 @@ abstract class CopyBundledMfiDocuments : DefaultTask() {
 // Built-in MFi documents, for head units that can read neither the shared Downloads collection nor
 // their own data directory. Give both paths and `assets/mfi/mfi.p7b` + `mfi.pk8` end up in the APK;
 // give neither and this block does nothing at all.
-val bundledMfiCertificate = project.xcertplayOptionalPath("xcertplay.mfi.certificate")
+val bundledMfiCertificate = project.nevoPlayOptionalPath("nevoPlay.mfi.certificate")
     ?: localMfiDocuments?.first
-val bundledMfiPrivateKey = project.xcertplayOptionalPath("xcertplay.mfi.privateKey")
+val bundledMfiPrivateKey = project.nevoPlayOptionalPath("nevoPlay.mfi.privateKey")
     ?: localMfiDocuments?.second
 if (!bundledMfiCertificate.isNullOrBlank() && !bundledMfiPrivateKey.isNullOrBlank()) {
     val copyBundledMfiDocuments = tasks.register<CopyBundledMfiDocuments>("copyBundledMfiDocuments") {
@@ -115,7 +115,7 @@ if (!bundledMfiCertificate.isNullOrBlank() && !bundledMfiPrivateKey.isNullOrBlan
 }
 
 android {
-    namespace = "com.shilapi.xcertplay.host"
+    namespace = "com.edd1e.nevoplay.host"
     compileSdk {
         version = release(37)
     }
@@ -126,12 +126,12 @@ android {
         // Every build shares versionName and versionCode, so without this a log cannot say which APK
         // produced it. This value is written as the first line of every session log and shown in
         // Settings -> Diagnostics, which is what makes "which build is on the car?" answerable.
-        buildConfigField("String", "BUILD_ID", "\"${project.xcertplayBuildId()}\"")
+        buildConfigField("String", "BUILD_ID", "\"${project.nevoPlayBuildId()}\"")
         // Shown in the bottom-right corner of the video surface, so the head unit in the car can be
         // identified on sight. The date is the commit's date - deterministic per commit, which keeps
         // the configuration cache meaningful, and accurate to the day for a CI build.
-        buildConfigField("String", "APP_VERSION", "\"${libs.versions.xcertplayVersionName.get()}\"")
-        buildConfigField("String", "BUILD_DATE", "\"${project.xcertplayCommitDate()}\"")
+        buildConfigField("String", "APP_VERSION", "\"${libs.versions.nevoPlayVersionName.get()}\"")
+        buildConfigField("String", "BUILD_DATE", "\"${project.nevoPlayCommitDate()}\"")
     }
 
     compileOptions {

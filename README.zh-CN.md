@@ -1,8 +1,8 @@
 <div align="center">
-  <img src="https://raw.githubusercontent.com/shilapi/xcertplay/refs/heads/master/asset/xcertplay_small.png" width="180" height="180" alt="xcertplay icon" />
-<h1><strong><font size="6">xcertplay</font></strong></h1>
+  <img src="shared/src/main/res/drawable-nodpi/nevoplay_launcher.png" width="180" height="180" alt="NEVOPlay 图标" />
+<h1><strong><font size="6">NEVOPlay</font></strong></h1>
   <a href="README.md">English</a> | <a href="README.zh-CN.md">中文</a>
-  <p>xcertplay 是面向 Android 车机的 CarPlay 接收端项目。支持通过 CH341 I2C 桥接到 MFi 芯片，亦可通过板载 I2C 控制器直连，支持 CarPlay 有线和无线连接。</p>
+  <p>NEVOPlay 是面向 NEVO A07 Android 车机的 CarPlay 接收端项目。支持通过 CH341 I2C 桥接到 MFi 芯片，亦可通过板载 I2C 控制器直连，支持 CarPlay 有线和无线连接。</p>
 </div>
 
 > [!WARNING]
@@ -43,7 +43,7 @@
 
 ## 当前进度
 
-他运转👍，已在车机/手机平台测试，如果出现部分车机不适配的情况欢迎 issue （并附上你的 log ，位于 `/sdcard/Download/xcertplay/xcertplay.log`，设置页会显示确切路径；Android 9 上会退回 `/sdcard/Android/data/com.shilapi.xcertplay/files/logs/xcertplay.log`）
+它已在车机/手机平台测试，如果出现部分车机不适配的情况欢迎 issue（并附上日志，位于 `/sdcard/Download/nevoplay/nevoplay.log`，设置页会显示确切路径；Android 9 上会退回 `/sdcard/Android/data/com.edd1e.nevoplay/files/logs/nevoplay.log`）。
 
 转接板：[CH341-to-MFI](https://github.com/shilapi/ch341-to-mfi-chip)
 
@@ -64,16 +64,16 @@
 
 | 目录 | 能否读取 |
 | --- | --- |
-| `/sdcard/Download/xcertplay/` | 与会话日志同目录，文件管理器可见。但 Android 只对持有存储权限的应用开放他人写入的文档，较新版本可能读不到。 |
-| `/sdcard/Android/data/com.shilapi.xcertplay/files/mfi/` | 应用专属目录：不需要任何权限，各版本 Android 都能读；Android 11+ 对文件管理器隐藏。 |
+| `/sdcard/Download/nevoplay/` | 与会话日志同目录，文件管理器可见。但 Android 只对持有存储权限的应用开放他人写入的文档，较新版本可能读不到。 |
+| `/sdcard/Android/data/com.edd1e.nevoplay/files/mfi/` | 应用专属目录：不需要任何权限，各版本 Android 都能读；Android 11+ 对文件管理器隐藏。 |
 
-通过选择器选中的两个文档优先于固定目录；固定目录内部，`Download/xcertplay` 先于应用
+通过选择器选中的两个文档优先于固定目录；固定目录内部，`Download/nevoplay` 先于应用
 专属目录。`Local files` 设置项会显示实际将读取的文件，推完文件可点 `Refresh files`
 重新检查。
 
 ```bash
-adb push mfi.p7b /sdcard/Download/xcertplay/
-adb push mfi.pk8 /sdcard/Download/xcertplay/
+adb push mfi.p7b /sdcard/Download/nevoplay/
+adb push mfi.pk8 /sdcard/Download/nevoplay/
 ```
 
 ### 把证书编译进 APK
@@ -83,8 +83,8 @@ adb push mfi.pk8 /sdcard/Download/xcertplay/
 
 ```bash
 ./gradlew :automotive:assembleDebug \
-  -Pxcertplay.mfi.certificate=/绝对路径/certificate.p7b \
-  -Pxcertplay.mfi.privateKey=/绝对路径/identity.pk8
+  -PnevoPlay.mfi.certificate=/绝对路径/certificate.p7b \
+  -PnevoPlay.mfi.privateKey=/绝对路径/identity.pk8
 ```
 
 两个文件会被拷成 `assets/mfi/mfi.p7b` 与 `assets/mfi/mfi.pk8`，并且优先于两个目录被读取。

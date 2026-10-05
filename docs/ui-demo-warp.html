@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="color-scheme" content="dark">
-<title>xcertplay · Warp 终端风格 UI 提案</title>
+<title>NEVOPlay · Warp 终端风格 UI 提案</title>
 <!--
   重新渲染某一屏（macOS）：
     "Google Chrome" --headless --use-mock-keychain \
@@ -21,7 +21,7 @@
 -->
 <style>
   /* ===========================================================================
-     xcertplay · Warp 终端风格 UI 提案
+     NEVOPlay · Warp 终端风格 UI 提案
      设计语言（与现有实现的差别，一句话版）：
        平面代替玻璃 · 等宽代替无衬线 · 细线代替投影 · 文字状态代替彩色控件
      画布 2560×1600（车机原生分辨率），下列尺寸均为画布 px。
@@ -214,7 +214,7 @@
 
 <!-- ======================= 设计规范（总览视图可见） ======================= -->
 <header class="spec">
-  <h1>xcertplay · <span>Warp 终端风格</span> UI 提案</h1>
+  <h1>NEVOPlay · <span>Warp 终端风格</span> UI 提案</h1>
   <div class="lead">
     画布 2560×1600。把现有的深灰 + 绿色调继续往前推一步：去掉玻璃、投影与圆角胶囊，改成
     平面块 + 1px 细线 + 等宽字体；状态用文字与符号表达，而不是靠颜色堆叠。所有数值仍来自
@@ -281,7 +281,7 @@
 <section class="screen" id="s1">
   <div class="topbar">
     <span class="prompt" style="font-size:30px">❯</span>
-    <span class="brand">xcertplay</span>
+    <span class="brand">NEVOPlay</span>
     <span class="crumb">head unit · 无线 CarPlay</span>
     <div class="right">
       <span class="chip on"><span class="dot">●</span>蓝牙 paired: Edd1e</span>
@@ -293,7 +293,7 @@
 
   <!-- 左：命令区 -->
   <div style="position:absolute;left:72px;top:210px;width:1360px">
-    <div style="font-size:22px;color:var(--faint)">❯ xcertplay --wireless</div>
+    <div style="font-size:22px;color:var(--faint)">❯ NEVOPlay --wireless</div>
     <div style="margin-top:18px;font-size:104px;font-weight:700;letter-spacing:-3px;line-height:1.1">
       等待 iPhone<span class="cursor" style="margin-left:14px"></span>
     </div>
@@ -329,7 +329,7 @@
   <div class="block" style="left:1496px;top:210px;width:992px">
     <div class="bh">status<span class="tail" style="color:var(--faint)">每 2s 刷新</span></div>
     <div class="out">
-      <div class="ln"><span class="m" style="color:var(--faint)">$ xcertplay status</span></div>
+      <div class="ln"><span class="m" style="color:var(--faint)">$ NEVOPlay status</span></div>
       <div class="ln ok"><span class="m">● bluetooth      active — paired: Edd1e</span></div>
       <div class="ln"><span class="m">○ wifi-direct    inactive</span></div>
       <div class="ln"><span class="m">○ mfi-coproc     probing 0x10 / 0x11 …</span></div>
@@ -338,7 +338,7 @@
   </div>
 
   <div class="block" style="left:1496px;top:566px;width:992px">
-    <div class="bh">recent<span class="tail" style="color:var(--faint)">xcertplay.log</span></div>
+    <div class="bh">recent<span class="tail" style="color:var(--faint)">nevoplay.log</span></div>
     <div class="out">
       <div class="ln"><span class="t">22:14:07</span><span class="tag">mfi</span><span class="m">probe 0x10 → 0x11 ok</span></div>
       <div class="ln"><span class="t">22:14:07</span><span class="tag">bt</span><span class="m">paired device “Edd1e”</span></div>
@@ -464,7 +464,7 @@
     <div class="bh">诊断</div>
     <div style="padding:16px 30px 20px">
       <div class="kv"><span class="k">build</span><span class="v" style="font-size:19px">2d745fd+run36591191976</span></div>
-      <div class="kv"><span class="k">日志</span><span class="v" style="font-size:19px">Download/xcertplay/</span></div>
+      <div class="kv"><span class="k">日志</span><span class="v" style="font-size:19px">Download/nevoplay/</span></div>
       <div class="kv"><span class="k">轮转</span><span class="v">8 代 · 已脱敏</span></div>
     </div>
     <div class="li" style="padding:20px 30px">
@@ -679,7 +679,7 @@
   <div class="topbar">
     <span class="prompt" style="font-size:30px">❯</span>
     <span class="brand">日志</span>
-    <span class="crumb">/ Download/xcertplay/xcertplay.log</span>
+    <span class="crumb">/ Download/nevoplay/nevoplay.log</span>
     <div class="right">
       <span class="chip on"><span class="dot">●</span>已脱敏</span>
       <span class="chip"><span class="dot">○</span>8 代轮转</span>
@@ -689,9 +689,9 @@
   <div class="hr" style="left:72px;right:72px;top:142px"></div>
 
   <div class="block" style="left:72px;top:190px;width:1740px">
-    <div class="bh">xcertplay.log<span class="tail" style="color:var(--faint)">实时 · 自动滚到底部</span></div>
+    <div class="bh">nevoplay.log<span class="tail" style="color:var(--faint)">实时 · 自动滚到底部</span></div>
     <div class="out">
-      <div class="ln"><span class="m" style="color:var(--faint)">$ tail -f xcertplay.log</span></div>
+      <div class="ln"><span class="m" style="color:var(--faint)">$ tail -f nevoplay.log</span></div>
       <div class="ln"><span class="t">22:13:58.104</span><span class="tag">build</span><span class="m">2d745fd+run36591191976 · v1.3.1.40</span></div>
       <div class="ln"><span class="t">22:13:58.220</span><span class="tag">display</span><span class="m">surface 2560×1600 · scale 1.0x · 60 fps</span></div>
       <div class="ln ok"><span class="t">22:13:58.402</span><span class="tag">mfi</span><span class="m">coproc 0x11 ready · reset gpio null</span></div>
@@ -734,7 +734,7 @@
   <div class="block" style="left:1876px;top:800px;width:612px">
     <div class="bh">存储</div>
     <div style="padding:16px 30px 24px">
-      <div class="kv"><span class="k" style="min-width:150px">路径</span><span class="v" style="font-size:18px">Download/xcertplay/</span></div>
+      <div class="kv"><span class="k" style="min-width:150px">路径</span><span class="v" style="font-size:18px">Download/nevoplay/</span></div>
       <div class="kv"><span class="k" style="min-width:150px">大小</span><span class="v">1.8 MB</span></div>
       <div class="kv"><span class="k" style="min-width:150px">轮转</span><span class="v">8 代</span></div>
       <div class="kv"><span class="k" style="min-width:150px">脱敏</span><span class="v a">写入前</span></div>

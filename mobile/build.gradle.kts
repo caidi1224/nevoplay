@@ -4,18 +4,18 @@ plugins {
 }
 
 android {
-    namespace = "com.shilapi.xcertplay"
+    namespace = "com.edd1e.nevoplay"
     compileSdk {
         version = release(37)
     }
 
     defaultConfig {
-        applicationId = "com.shilapi.xcertplay"
+        applicationId = "com.edd1e.nevoplay"
         minSdk = 28
         targetSdk = 37
         // 单一来源见 gradle/libs.versions.toml，避免两个模块的版本号不同步。
-        versionCode = libs.versions.xcertplayVersionCode.get().toInt()
-        versionName = libs.versions.xcertplayVersionName.get()
+        versionCode = libs.versions.nevoPlayVersionCode.get().toInt()
+        versionName = libs.versions.nevoPlayVersionName.get()
 
     }
 

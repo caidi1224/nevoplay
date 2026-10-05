@@ -22,7 +22,7 @@ static void throw_native_error(JNIEnv *env, int error_number, const char *operat
     }
 
     jclass exception_class = (*env)->FindClass(
-            env, "com/shilapi/xcertplay/transport/LinuxI2cNativeException");
+            env, "com/edd1e/nevoplay/transport/LinuxI2cNativeException");
     if (exception_class == NULL) return;
 
     jmethodID constructor = (*env)->GetMethodID(env, exception_class, "<init>", "(ILjava/lang/String;)V");
@@ -36,7 +36,7 @@ static void throw_native_error(JNIEnv *env, int error_number, const char *operat
 }
 
 JNIEXPORT jint JNICALL
-Java_com_shilapi_xcertplay_transport_LinuxI2cNative_open(
+Java_com_edd1e_nevoplay_transport_LinuxI2cNative_open(
         JNIEnv *env, jobject receiver, jstring device_path) {
     (void) receiver;
     if (device_path == NULL) {
@@ -59,7 +59,7 @@ Java_com_shilapi_xcertplay_transport_LinuxI2cNative_open(
 }
 
 JNIEXPORT jbyteArray JNICALL
-Java_com_shilapi_xcertplay_transport_LinuxI2cNative_transaction(
+Java_com_edd1e_nevoplay_transport_LinuxI2cNative_transaction(
         JNIEnv *env,
         jobject receiver,
         jint file_descriptor,
@@ -136,7 +136,7 @@ Java_com_shilapi_xcertplay_transport_LinuxI2cNative_transaction(
 }
 
 JNIEXPORT void JNICALL
-Java_com_shilapi_xcertplay_transport_LinuxI2cNative_close(
+Java_com_edd1e_nevoplay_transport_LinuxI2cNative_close(
         JNIEnv *env, jobject receiver, jint file_descriptor) {
     (void) receiver;
     if (file_descriptor < 0) {
