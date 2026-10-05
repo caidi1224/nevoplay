@@ -84,6 +84,7 @@ import com.edd1e.nevoplay.orchestration.ManualHotspotSecurity
 import com.edd1e.nevoplay.orchestration.MfiTarget
 import com.edd1e.nevoplay.orchestration.WirelessHotspotMode
 import com.edd1e.nevoplay.orchestration.isManualHotspotChannelCompatible
+import com.edd1e.nevoplay.orchestration.keepsHotspotAcrossRebuild
 import com.edd1e.nevoplay.transport.Iap2IdentificationConfig
 import com.edd1e.nevoplay.transport.Iap2LocationProvider
 import com.edd1e.nevoplay.transport.UsbDeviceId
@@ -4564,6 +4565,10 @@ class CarPlayHostActivity : ComponentActivity() {
         if (reason.contains("Wi-Fi P2P", ignoreCase = true)) reportHotspotTrouble()
         val failures = consecutiveReconnectFailures
         consecutiveReconnectFailures = failures + 1
+        // A phone that walked away comes back to the group it already knows, so the live hotspot is
+        // handed to the next controller instead of being torn down and rebuilt - that churn is what
+        // the framework answers BUSY to. A stack that failed on its own gets a clean group instead.
+        val retainHotspot = wirelessEnabled && keepsHotspotAcrossRebuild(reason)
         val delayMillis = if (reason.contains("AirPlay iAP tunnel", ignoreCase = true)) {
             IAP_TUNNEL_RECONNECT_DELAY_MILLIS
         } else {
@@ -4581,7 +4586,7 @@ class CarPlayHostActivity : ComponentActivity() {
                 ) {
                     return@postDelayed
                 }
-                restartCarPlay("Reconnecting after $reason")
+                restartCarPlay("Reconnecting after $reason", retainHotspot = retainHotspot)
             },
             delayMillis,
         )
