@@ -4562,11 +4562,13 @@ class CarPlayHostActivity : ComponentActivity() {
     }
 
     /**
-     * Tells the driver what to do about a Wi-Fi P2P state machine that keeps refusing to create a
-     * group. Reaching into Settings to toggle Wi-Fi is not something this app may do, and repeating
-     * the same failed attempt every two seconds is not a recovery - the framework frees the old group
-     * when it gets around to it. So say it once, on the stage banner where the missing picture would
-     * have been, and keep polling slowly in the background.
+     * Tells the driver what can be done about a Wi-Fi P2P state machine that keeps refusing to
+     * create a group. Reaching into Settings to toggle Wi-Fi is not something this app may do, and
+     * repeating the same failed attempt every two seconds is not a recovery - the framework frees
+     * the old group when it gets around to it. So say it once, on the stage banner where the missing
+     * picture would have been, name the one action that lives in this app, and keep polling slowly
+     * in the background. Rebooting the head unit is deliberately not offered: it cannot be done while
+     * driving, and the retained group is not what a reboot would be needed for.
      */
     private fun reportHotspotTrouble() {
         if (hotspotTroubleReported || consecutiveReconnectFailures < HOTSPOT_TROUBLE_AFTER_FAILURES) {
@@ -4575,14 +4577,14 @@ class CarPlayHostActivity : ComponentActivity() {
         hotspotTroubleReported = true
         setStatus(
             "Wi-Fi P2P is stuck after $consecutiveReconnectFailures attempts; " +
-                "toggle the head unit's Wi-Fi, or restart it",
+                "tap Connect to iPhone, or switch the head unit's Wi-Fi off and on once",
         )
     }
 
     /** Adds the recovery hint to every following failure line while P2P is stuck. */
     private fun withHotspotNotice(description: String): String =
         if (hotspotTroubleReported && description.contains("Wi-Fi P2P", ignoreCase = true)) {
-            "$description - toggle the head unit's Wi-Fi, or restart it"
+            "$description - tap Connect to iPhone, or switch Wi-Fi off and on once"
         } else {
             description
         }
