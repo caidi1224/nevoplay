@@ -274,6 +274,10 @@ class CarPlayHostActivity : ComponentActivity() {
     private var idleHotspotValue: TextView? = null
     private var idleMfiValue: TextView? = null
     private var idleLogToggle: HostToggle? = null
+    /** The "Connect to iPhone" row, shown whenever a fresh handshake is worth offering. */
+    private var reconnectCommandRow: View? = null
+    /** The reconnect that is waiting out its backoff, so a tap can replace the wait. */
+    private var pendingReconnect: Runnable? = null
     private var contentRoot: View? = null
     private var idleTitleBasePx = 0f
 
@@ -1084,6 +1088,14 @@ class CarPlayHostActivity : ComponentActivity() {
         )
 
         val commands = HostBlock(this, "commands").apply {
+            // The one action that answers "I took the phone away and brought it back". It is shown
+            // only while it can do something - wireless, no live session, display known.
+            reconnectCommandRow = idleCommandRow(
+                title = "Connect to iPhone",
+                hint = "Start a fresh wireless handshake now",
+                chip = "Connect",
+            ) { connectToIphoneNow() }.apply { visibility = View.GONE }
+            addRow(requireNotNull(reconnectCommandRow))
             addRow(
                 idleCommandRow(
                     title = "Settings",
@@ -1141,8 +1153,16 @@ class CarPlayHostActivity : ComponentActivity() {
         return root
     }
 
-    /** One action on the idle screen: prompt, name, hint, and a chip that the row itself handles. */
-    private fun idleCommandRow(title: String, hint: String, onClick: () -> Unit): View =
+    /**
+     * One action on the idle screen: prompt, name, hint, and a chip that the row itself handles.
+     * The chip label names the verb, so a row that starts a handshake does not read as "Open".
+     */
+    private fun idleCommandRow(
+        title: String,
+        hint: String,
+        chip: String = "Open",
+        onClick: () -> Unit,
+    ): View =
         LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             isClickable = true
@@ -1161,7 +1181,7 @@ class CarPlayHostActivity : ComponentActivity() {
                         LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
                     )
                     addView(
-                        HostUi.chip(this@CarPlayHostActivity, "Open").apply {
+                        HostUi.chip(this@CarPlayHostActivity, chip).apply {
                             isClickable = false
                             isFocusable = false
                         },
@@ -1275,6 +1295,16 @@ class CarPlayHostActivity : ComponentActivity() {
         idleHotspotValue?.text = if (wirelessEnabled) hotspotStatus.state else "off"
         idleMfiValue?.text = mfiTargetLabel(mfiTarget).lowercase()
         idleLogToggle?.setCheckedQuietly(debugLogsEnabled)
+        // Offered while a fresh handshake can still change something: wireless, no live session,
+        // and a display already known. Greyed while a rebuild is running, so a tap that could not
+        // do anything is visibly unavailable instead of silently swallowed.
+        val offered = wirelessEnabled && activeAirPlaySession == null && activeDisplaySize != null
+        reconnectCommandRow?.let { row ->
+            row.visibility = if (offered) View.VISIBLE else View.GONE
+            val ready = offered && !stackRebuildInProgress
+            row.isEnabled = ready
+            row.alpha = if (ready) 1f else 0.45f
+        }
     }
 
     private fun buildSettingsMenu(): View {
@@ -4575,21 +4605,52 @@ class CarPlayHostActivity : ComponentActivity() {
             reconnectBackoffMillis(failures)
         }
         appendLog("$reason; retrying in ${delayMillis}ms")
-        mainHandler.postDelayed(
-            {
-                reconnectScheduled = false
-                if (
-                    shuttingDown.get() ||
-                    menuOpen ||
-                    stackRebuildInProgress ||
-                    generation != restartGeneration
-                ) {
-                    return@postDelayed
-                }
-                restartCarPlay("Reconnecting after $reason", retainHotspot = retainHotspot)
-            },
-            delayMillis,
-        )
+        val pending = Runnable {
+            pendingReconnect = null
+            reconnectScheduled = false
+            if (
+                shuttingDown.get() ||
+                menuOpen ||
+                stackRebuildInProgress ||
+                generation != restartGeneration
+            ) {
+                return@Runnable
+            }
+            restartCarPlay("Reconnecting after $reason", retainHotspot = retainHotspot)
+        }
+        pendingReconnect = pending
+        mainHandler.postDelayed(pending, delayMillis)
+    }
+
+    /**
+     * Starts one fresh wireless handshake now, instead of waiting out the backoff.
+     *
+     * This is the whole answer to "I walked away with the phone and came back": the app keeps the
+     * advertisement - and the group the phone already knows - alive and waits, and this row lets the
+     * driver ask for the handshake immediately. The live hotspot is handed to the next controller
+     * rather than rebuilt, so the phone re-associates to the network it remembers.
+     */
+    private fun connectToIphoneNow() {
+        if (shuttingDown.get() || !wirelessEnabled) return
+        if (stackRebuildInProgress) {
+            appendLog("Connect to iPhone ignored; a rebuild is already in progress")
+            return
+        }
+        if (activeAirPlaySession != null) {
+            appendLog("Connect to iPhone ignored; a CarPlay session is already up")
+            return
+        }
+        if (activeDisplaySize == null) {
+            appendLog("Connect to iPhone ignored; the display size is not known yet")
+            return
+        }
+        pendingReconnect?.let { mainHandler.removeCallbacks(it) }
+        pendingReconnect = null
+        reconnectScheduled = false
+        consecutiveReconnectFailures = 0
+        hotspotTroubleReported = false
+        appendLog("Connect to iPhone tapped; reconnecting now")
+        restartCarPlay("Connecting to iPhone", retainHotspot = true)
     }
 
     /**
