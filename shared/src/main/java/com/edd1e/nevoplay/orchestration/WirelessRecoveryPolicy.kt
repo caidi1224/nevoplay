@@ -4,20 +4,25 @@ package com.edd1e.nevoplay.orchestration
  * Whether a rebuild that follows [reason] should hand the live Wi-Fi hotspot to the next
  * controller instead of removing it.
  *
- * A phone that walked away - the AirPlay session ended, the transport reported an error, or the iAP
- * tunnel under the session went away - is coming back to the network it already knows. Tearing that
- * group down to build an identical one is what leaves the framework answering BUSY for the next
- * several attempts, which is how a driver who simply left the car with the phone ends up reading a
- * Wi-Fi hint thirty seconds later.
+ * The live group is kept unless the failure is about the local wireless stack itself, because the
+ * two cases want opposite things:
  *
- * A stack that failed on its own gets a clean group instead: a P2P group that could not be created,
- * a hotspot with no usable host address, or an MFi refusal means the live group may be exactly what
- * is broken, and the retention check in [com.edd1e.nevoplay.network.WirelessHotspotRetention] would
- * discard it anyway when the identity no longer matches.
+ * A phone that went away - the session ended, the transport errored, the iAP tunnel went away, or
+ * the Bluetooth bootstrap could not reach the phone at all - is coming back to the network it
+ * already knows. A P2P group is created with a fresh SSID and passphrase, so removing the live one
+ * hands a returning phone a network it has never seen: it cannot re-associate on its own, and a
+ * driver who only left the car with the phone ends up reading a Wi-Fi hint and picking the car by
+ * hand. Rebuilding the group on every attempt is also what the framework answers BUSY to.
+ *
+ * When the *local* stack is what failed - P2P could not create a group, the hotspot had no usable
+ * host address, MFi refused - the live group may be exactly what is broken, so the next bring-up
+ * gets a clean one. Retention is a no-op when nothing is live, so failures with no bearing on the
+ * hotspot (a service that would not bind, a changed display) need no case of their own here.
  */
 fun keepsHotspotAcrossRebuild(reason: String): Boolean {
     val text = reason.lowercase()
-    return text.contains("session ended") ||
-        text.contains("transport error") ||
-        text.contains("iap tunnel")
+    val localStackFailed = text.contains("p2p") ||
+        text.contains("hotspot") ||
+        text.contains("mfi")
+    return !localStackFailed
 }
