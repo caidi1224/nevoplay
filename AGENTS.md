@@ -152,8 +152,8 @@ re-sync the base whenever upstream is merged (a merge to `1.3.2` restarts at
 Both numbers live in one place, `gradle/libs.versions.toml`:
 
 ```toml
-nevoPlayVersionName = "1.3.2.56"   # <upstream>.<n>
-nevoPlayVersionCode = "130256"     # <1302> * 100 + n, always increasing
+nevoPlayVersionName = "1.3.2.57"   # <upstream>.<n>
+nevoPlayVersionCode = "130257"     # <1302> * 100 + n, always increasing
 ```
 
 `mobile` and `automotive` read them from the version catalog, so the two
@@ -322,7 +322,7 @@ and the bar-state logging in this fork came to exist.
 - **所有更新都必须单独提交一个 commit**，一个逻辑改动一个 commit，交付时不留未提交的改动，确保任何一处改动都能单独回滚。
 - 已推送的历史（尤其 `master`）**不得强推、amend、rebase**；要撤销已推送的改动请用 `git revert <sha>` 生成一个新的可回滚 commit。只有尚未推送的本地 commit 才可以用 `git reset --hard HEAD~1`。
 - 提交信息沿用现有风格：`feat:`、`fix(scope):`、`opti:`、`chore:`、`update README.md`，版本号提交直接写 `1.3.0`。
-- **每交付一个改动，版本号末尾的小版本号 +1**（`1.3.2.55` → `1.3.2.56` → `1.3.2.57`…），不重复使用已经构建过的值；合并上游后以新的三段版本为基准重新从 `.1` 开始。两个数字集中在 `gradle/libs.versions.toml`（`nevoPlayVersionName` / `nevoPlayVersionCode`），mobile 与 automotive 都从那里读取，不会各写一份。
+- **每交付一个改动，版本号末尾的小版本号 +1**（`1.3.2.56` → `1.3.2.57` → `1.3.2.58`…），不重复使用已经构建过的值；合并上游后以新的三段版本为基准重新从 `.1` 开始。两个数字集中在 `gradle/libs.versions.toml`（`nevoPlayVersionName` / `nevoPlayVersionCode`），mobile 与 automotive 都从那里读取，不会各写一份。
 - 每个构建还带 `BuildConfig.BUILD_ID`（提交号 `[+run<CI运行号>]`）：写在会话日志**首行**，也显示在 设置 → 诊断 里——这是判断“车上装的是哪一版、日志出自哪一版”的依据。
 - **推送前必须先本地编译验证**（JDK 25 与 Android SDK 已装好，见上文），并且**每次验证/出包都用同一条命令先 clean**：车机版 `./gradlew clean verifyAutomotive`，手机版 `./gradlew clean verifyMobile`（任务是 `:shared` 单测 + 三个模块 lint + 出包；**clean 必须写在命令行第一位**，那是 Gradle 唯一保证的先后关系——clean 与构建写同一批目录，用任务级 `mustRunAfter` 只压住一部分任务会输给资源与签名任务；增量构建的陈旧产物由 `purgeStaleClassCopies` 自动兜底）。本机存在 `cert/` 时，出来的包会自动带上内置 MFi 证书，不需要再记 `-P` 参数。这个项目的增量产物会陈旧（构建中途失败会留下 `名字 2.class` 这类编号副本），代价是下一次不相关的构建报重复类（`FooKt 2.class`、`D8: Type ... is defined multiple times`、`... already exists, it cannot be overwritten by SerializableChange`）。clean 只花几秒，能从根上避开这一类失败；根项目还注册了 `purgeStaleClassCopies`，在每个模块 `preBuild` 前删掉这些编号副本，但那是第二道防线，不是第一道。CI 只负责单元测试与留档产物，不用来“发现编译不过”。
 - **撤销已推送的改动**：单个提交用 `git revert <sha>`；但**连续 revert 多个提交通常会冲突**，因为每个提交都改了 `libs.versions.toml`。要退回旧状态就用 `git checkout <旧提交> -- <文件>` 恢复文件后向前提交，并且**仍要使用一个全新的版本号**（已构建过的值不能复用：退回 1.3.1.20 的界面是以 1.3.1.35 发布的）。动手前先 `git tag -f before-<改动> HEAD` 留个后路。
